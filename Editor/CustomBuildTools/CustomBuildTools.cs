@@ -1,6 +1,4 @@
-using Newtonsoft.Json;
 using System;
-using System.IO;
 using System.Linq;
 using System.Threading.Tasks;
 using UnityEditor;
@@ -9,7 +7,6 @@ using UnityEditor.AddressableAssets.HostingServices;
 using UnityEditor.AddressableAssets.Settings;
 using UnityEditor.Build.Reporting;
 using UnityEngine;
-using WebSocketSharp;
 using Arbelos.BuildUtility.Runtime;
 
 namespace Arbelos.BuildUtility.Editor
@@ -447,7 +444,7 @@ namespace Arbelos.BuildUtility.Editor
 
         private async void BuildPlayer()
         {
-            if(!isBuilding)
+            if (!isBuilding)
             {
                 isBuilding = true;
                 // Remove the delegate to ensure it runs only once
@@ -490,7 +487,7 @@ namespace Arbelos.BuildUtility.Editor
                 }
                 // Reset the building flag
                 isBuilding = false;
-            }   
+            }
         }
 
         private async Task BuildGame()
@@ -538,9 +535,9 @@ namespace Arbelos.BuildUtility.Editor
 
         private void SetupAndroidKeystore()
         {
-            if(EditorUserBuildSettings.activeBuildTarget == BuildTarget.Android)
+            if (EditorUserBuildSettings.activeBuildTarget == BuildTarget.Android)
             {
-                if (currentProjectData.androidKeyStoreFilePath.IsNullOrEmpty() || currentProjectData.androidKeyStoreAliasName.IsNullOrEmpty() || currentProjectData.androidKeyStoreAliasPassword.IsNullOrEmpty() || currentProjectData.androidKeyStorePassword.IsNullOrEmpty())
+                if (string.IsNullOrEmpty(currentProjectData.androidKeyStoreFilePath) || string.IsNullOrEmpty(currentProjectData.androidKeyStoreAliasName) || string.IsNullOrEmpty(currentProjectData.androidKeyStoreAliasPassword) || string.IsNullOrEmpty(currentProjectData.androidKeyStorePassword))
                 {
                     Debug.LogError("BUILD UTILITY - Project Data file contains null values.");
                     return;

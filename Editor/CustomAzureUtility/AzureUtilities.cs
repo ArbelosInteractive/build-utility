@@ -6,7 +6,6 @@ using System.Threading.Tasks;
 using UnityEditor;
 using UnityEngine;
 using UnityEngine.Networking;
-using WebSocketSharp;
 using Arbelos.BuildUtility.Runtime;
 
 namespace Arbelos.BuildUtility.Editor
@@ -30,7 +29,7 @@ namespace Arbelos.BuildUtility.Editor
                 return;
             }
 
-            if (currentProjectData.azureStorageAccountName.IsNullOrEmpty() || currentProjectData.azureStorageAccountSharedKey.IsNullOrEmpty() || currentProjectData.azureStorageAccountURL.IsNullOrEmpty())
+            if (string.IsNullOrEmpty(currentProjectData.azureStorageAccountName) || string.IsNullOrEmpty(currentProjectData.azureStorageAccountSharedKey) || string.IsNullOrEmpty(currentProjectData.azureStorageAccountURL))
             {
                 Debug.LogError("BUILD UTILITY - Project Data file contains null values.");
                 return;
@@ -92,7 +91,7 @@ namespace Arbelos.BuildUtility.Editor
         {
             var operation = request.SendWebRequest();
 
-            while(!operation.isDone)
+            while (!operation.isDone)
             {
                 await Task.Yield();
             }
