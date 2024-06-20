@@ -13,7 +13,7 @@ namespace Arbelos.BuildUtility.Editor
     {
         private static AddressableAssetSettings settings;
         private static ProjectData currentProjectData = null;
-        private static IHostingService localHostingService;
+        private static CustomAddressableBuild customBuildAsset = null;
 
         [MenuItem("Build Utility/Setup Addressables")]
         public static void SetupAddressables()
@@ -34,13 +34,17 @@ namespace Arbelos.BuildUtility.Editor
                     return;
                 }
                 //Create the whole addressableassetdata folder structure including the settings and everything.
-                settings = AddressableAssetSettings.Create(AddressableAssetSettingsDefaultObject.kDefaultConfigFolder,"AddressableAssetSettings", true, true);
+                settings = AddressableAssetSettings.Create(AddressableAssetSettingsDefaultObject.kDefaultConfigFolder, "AddressableAssetSettings", true, true);
                 //Create the default object.
                 AddressableAssetSettingsDefaultObject.Settings = settings;
 
                 CreateAddressableProfiles();
 
                 CreateAddressableHostingService();
+
+                CreateCustomAddressableBuildAsset();
+
+                SetBuiltInDataSettings();
 
                 //Setup Variables for settings
                 settings.OverridePlayerVersion = "";
@@ -54,6 +58,12 @@ namespace Arbelos.BuildUtility.Editor
                 settings.NonRecursiveBuilding = true;
                 settings.ShaderBundleNaming = UnityEditor.AddressableAssets.Build.ShaderBundleNaming.ProjectName;
                 settings.MonoScriptBundleNaming = UnityEditor.AddressableAssets.Build.MonoScriptBundleNaming.Disabled;
+                if (customBuildAsset != null)
+                {
+                    //Remove the last databuilder script from the settings and add the customBuidAsset as the last one.
+                    settings.DataBuilders.RemoveAt(settings.DataBuilders.Count - 1);
+                    settings.DataBuilders.Add(customBuildAsset);
+                }
                 EditorUtility.SetDirty(settings);
                 AssetDatabase.SaveAssets();
                 Debug.Log("Addressables setup completed.");
@@ -63,7 +73,7 @@ namespace Arbelos.BuildUtility.Editor
         private static void CreateAddressableProfiles()
         {
             var profiles = settings.profileSettings.GetAllProfileNames();
-            if(profiles.Count <= 1)
+            if (profiles.Count <= 1)
             {
                 var deploymentProfileId = settings.profileSettings.AddProfile("Deployment", settings.activeProfileId);
                 var editorHostedProfileId = settings.profileSettings.AddProfile("EditorHosted", settings.activeProfileId);
@@ -102,7 +112,7 @@ namespace Arbelos.BuildUtility.Editor
                 Debug.LogError("Failed to create local hosting service!");
                 return;
             }
-            if(hostingService is HttpHostingService httpService)
+            if (hostingService is HttpHostingService httpService)
             {
                 // Assign a random port number
                 int randomPort = Random.Range(60000, 70000);
@@ -113,6 +123,54 @@ namespace Arbelos.BuildUtility.Editor
             EditorUtility.SetDirty(settings);
             AssetDatabase.SaveAssets();
             Debug.Log("Local Hosting Service setup completed.");
+        }
+
+        private static void CreateCustomAddressableBuildAsset()
+        {
+            customBuildAsset = ScriptableObject.CreateInstance<CustomAddressableBuild>();
+
+            string savePath = AssetDatabase.GetAssetPath(currentProjectData);
+            if (string.IsNullOrEmpty(savePath))
+            {
+                Debug.LogError("FAILED TO GENERATE CUSTOM ADDRESSABLE BUILD ASSET. ProjectData.asset not found in Resources folder. Please create a ProjectData asset in the Resources folder and assign the values.");
+            }
+            else
+            {
+                AssetDatabase.CreateAsset(customBuildAsset, savePath.Replace("ProjectData.asset", "Custom Build Script.asset"));
+                AssetDatabase.SaveAssets();
+                AssetDatabase.Refresh();
+            }
+        }
+
+        private static void SetBuiltInDataSettings()
+        {
+            // Find the Built-In Data Addressable Asset group
+            AddressableAssetGroup builtInDataGroup = settings.FindGroup(AddressableAssetSettings.PlayerDataGroupName);
+
+            if (builtInDataGroup == null)
+            {
+                Debug.LogError("Could not find Built-In Data Addressable Asset group.");
+                return;
+            }
+
+            // Access the PlayerDataGroupSchema
+            PlayerDataGroupSchema playerDataGroupSchema = builtInDataGroup.GetSchema<PlayerDataGroupSchema>();
+
+            if (playerDataGroupSchema == null)
+            {
+                Debug.LogError("Could not find PlayerDataGroupSchema in the Built-In Data group.");
+                return;
+            }
+
+            // Disable "Include Resources Folders" and "Include Build Settings Scenes"
+            playerDataGroupSchema.IncludeResourcesFolders = false;
+            playerDataGroupSchema.IncludeBuildSettingsScenes = false;
+
+            // Save the changes
+            EditorUtility.SetDirty(builtInDataGroup);
+            AssetDatabase.SaveAssets();
+
+            Debug.Log("Built-In Data group configured successfully.");
         }
     }
 }

@@ -26,3 +26,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 ### Added
 - Removed VisionOS Support
 
+## [1.0.5] - 2024-06-20
+### Added
+- Auto-Setup Custom Addressable Build Asset assign and auto-setup built in player group settings.
+- Update Addressables Dependency Version.
+
