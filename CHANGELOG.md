@@ -21,3 +21,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 ## [1.0.3] - 2024-06-19
 ### Added
 - Added Guide PDF meta.
+
+## [1.0.4] - 2024-06-19
+### Added
+- Removed VisionOS Support
+
