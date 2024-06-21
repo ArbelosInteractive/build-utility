@@ -81,58 +81,58 @@ namespace Arbelos.BuildUtility.Runtime
 
             Addressables.Release(handle);
 
-                if (updatedResourceLocators != null)
-                {
-                    //Clears old files before downloading new ones
-                    PurgeAddressableFiles();
-                    onUpdateAvailable?.Invoke();
-                    var allKeys = updatedResourceLocators[0].Keys;
+            if (updatedResourceLocators != null)
+            {
+                //Clears old files before downloading new ones
+                PurgeAddressableFiles();
+                onUpdateAvailable?.Invoke();
+                var allKeys = updatedResourceLocators[0].Keys;
 
-                    for (int i = 1; i < updatedResourceLocators.Count; i++)
+                for (int i = 1; i < updatedResourceLocators.Count; i++)
+                {
+                    allKeys.Append(updatedResourceLocators[i].Keys);
+                }
+
+                numAssetBundlesToDownload = allKeys.ToList().Count;
+                numDownloaded = 0;
+
+                foreach (var key in allKeys)
+                {
+                    numDownloaded++;
+
+                    //if (ui != null)
+                    //{
+                    //    ui.UpdateDownloadsText($"downloading ... {numDownloaded}/{numAssetBundlesToDownload}");
+                    //}
+
+
+                    var keyDownloadSizeKb = BytesToKiloBytes(await Addressables.GetDownloadSizeAsync(key).Task);
+                    if (keyDownloadSizeKb <= 0)
                     {
-                        allKeys.Append(updatedResourceLocators[i].Keys);
+                        continue;
                     }
 
-                    numAssetBundlesToDownload = allKeys.ToList().Count;
-                    numDownloaded = 0;
-
-                    foreach (var key in allKeys)
+                    var keyDownloadOperation = Addressables.DownloadDependenciesAsync(key);
+                    while (!keyDownloadOperation.IsDone)
                     {
-                        numDownloaded++;
+                        await Task.Yield();
+                        var status = keyDownloadOperation.GetDownloadStatus();
+                        percentageDownloaded = status.Percent * 100.0f;
 
                         //if (ui != null)
                         //{
-                        //    ui.UpdateDownloadsText($"downloading ... {numDownloaded}/{numAssetBundlesToDownload}");
+                        //    ui.UpdateProgressText(percent);
                         //}
-
-
-                        var keyDownloadSizeKb = BytesToKiloBytes(await Addressables.GetDownloadSizeAsync(key).Task);
-                        if (keyDownloadSizeKb <= 0)
-                        {
-                            continue;
-                        }
-
-                        var keyDownloadOperation = Addressables.DownloadDependenciesAsync(key);
-                        while (!keyDownloadOperation.IsDone)
-                        {
-                            await Task.Yield();
-                            var status = keyDownloadOperation.GetDownloadStatus();
-                            percentageDownloaded = status.Percent * 100.0f;
-
-                            //if (ui != null)
-                            //{
-                            //    ui.UpdateProgressText(percent);
-                            //}
-                        }
-
-                        if (keyDownloadOperation.IsDone)
-                        {
-                            //Release the operation handle once a key has been downloaded
-                            Addressables.Release(keyDownloadOperation);
-                        }
                     }
-                    Debug.Log("all downloads completed");
+
+                    if (keyDownloadOperation.IsDone)
+                    {
+                        //Release the operation handle once a key has been downloaded
+                        Addressables.Release(keyDownloadOperation);
+                    }
                 }
+                Debug.Log("all downloads completed");
+            }
         }
 
         public async void Initialize()
@@ -154,47 +154,47 @@ namespace Arbelos.BuildUtility.Runtime
 
             Addressables.Release(handle);
 #if !UNITY_EDITOR
-                addressableData = Resources.Load<GameAddressableData>("GameAddressableData");    
-                if(addressableData != null && !String.IsNullOrEmpty(addressableData.profileName))
+            addressableData = Resources.Load<GameAddressableData>("GameAddressableData");
+            if (addressableData != null && !String.IsNullOrEmpty(addressableData.profileName))
+            {
+                var profileType = addressableData.profileName;
+                if (profileType == "Deployment")
                 {
-                    var profileType = addressableData.profileName;
-                    if (profileType == "Deployment")
+                    AsyncOperationHandle<List<string>> catalogHandle = Addressables.CheckForCatalogUpdates(false);
+
+                    await catalogHandle.Task;
+
+                    List<string> possibleUpdates = catalogHandle.Result;
+
+                    Addressables.Release(catalogHandle);
+
+                    if (possibleUpdates.Count > 0)
                     {
-                        AsyncOperationHandle<List<string>> catalogHandle = Addressables.CheckForCatalogUpdates(false);
-                    
-                        await catalogHandle.Task;
-
-                        List<string> possibleUpdates = catalogHandle.Result;
-
-                        Addressables.Release(catalogHandle);
-
-                        if (possibleUpdates.Count > 0)
-                        {
-                            Debug.Log("Update available");
-                            await UpdateAndDownload();
-                        }
-                        else
-                        {
-                            Debug.Log("No update available");
-                        }
-
-                        //validate files
-                        if (ValidateCurrentlyDownloadedFiles())
-                        {
-                            isInitialized = true;
-                            onInitialized?.Invoke();
-                        }     
+                        Debug.Log("Update available");
+                        await UpdateAndDownload();
                     }
-                    else if (profileType == "EditorHosted")
+                    else
+                    {
+                        Debug.Log("No update available");
+                    }
+
+                    //validate files
+                    if (ValidateCurrentlyDownloadedFiles())
                     {
                         isInitialized = true;
                         onInitialized?.Invoke();
                     }
                 }
-                else
+                else if (profileType == "EditorHosted")
                 {
-                    Debug.LogError("Addressable Profile Data not found, please build correctly!");
+                    isInitialized = true;
+                    onInitialized?.Invoke();
                 }
+            }
+            else
+            {
+                Debug.LogError("Addressable Profile Data not found, please build correctly!");
+            }
 #endif
 #if UNITY_EDITOR
                 isInitialized = true;
@@ -223,7 +223,7 @@ namespace Arbelos.BuildUtility.Runtime
             //File IDS will be used to search for folders in cachePath assets that are under the same folder names as the assetFileIDs
             List<string> assetsFileIds = FetchGameAssetsFileIds(addressableData.AddressableCRCList);
 
-            if(!ValidateGameFiles(addressableData.AddressableCRCList, assetsFileIds, cachePath))
+            if (!ValidateGameFiles(addressableData.AddressableCRCList, assetsFileIds, cachePath))
             {
                 PurgeAddressableFiles();
                 onValidationFail?.Invoke();
@@ -337,16 +337,31 @@ namespace Arbelos.BuildUtility.Runtime
 
             foreach (var data in _data)
             {
-                string fileName = data.key;
-                string[] parts = fileName.Split('_');
-                if (parts.Length >= 3)
+                //Unity Built In Shader bundle file
+                if (data.key.Contains("unitybuiltinshaders"))
                 {
-                    string[] subParts = parts[3].Split('.'); //Separate the .bundle from the file name.
-                    if (subParts.Length > 0)
+                    string fileName = data.key;
+                    string[] parts = fileName.Split('_');
+                    if (parts.Length >= 3)
                     {
-                        string targetString = subParts[0];  //get the file id
-                        // Use targetString as needed
-                        _assetsFileIds.Add(targetString); // Output: f59db7a2af3be597e715cca63b051863
+                        var finalName = parts[0] + "_unitybuiltinshaders";
+                        _assetsFileIds.Add(finalName);
+                    }
+                }
+                else
+                {
+                    // Game/Scene Bundle Files
+                    string fileName = data.key;
+                    string[] parts = fileName.Split('_');
+                    if (parts.Length >= 3)
+                    {
+                        string[] subParts = parts[3].Split('.'); //Separate the .bundle from the file name.
+                        if (subParts.Length > 0)
+                        {
+                            string targetString = subParts[0];  //get the file id
+                                                                // Use targetString as needed
+                            _assetsFileIds.Add(targetString); // Output: f59db7a2af3be597e715cca63b051863
+                        }
                     }
                 }
             }
@@ -415,7 +430,7 @@ namespace Arbelos.BuildUtility.Runtime
             List<DirectoryInfo> assetFolders = FindAssetFolders(_fileIds, _cachePath);
 
             //TODO: fix this hardcoded value of 2
-            if (assetFolders.Count == 2)
+            if (assetFolders.Count >= 2)
             {
                 foreach (var folder in assetFolders)
                 {
@@ -423,25 +438,56 @@ namespace Arbelos.BuildUtility.Runtime
                     {
                         if (data.key.Contains(folder.Name))
                         {
-                            var files = folder.GetFiles();
-                            if (files.Length < 2)
+                            //Check if a sub folder exists
+                            var subDirs = folder.GetDirectories();
+                            if (subDirs.Length > 0)
                             {
-                                return false;
+                                var files = subDirs.First().GetFiles();
+                                if (files.Length < 2)
+                                {
+                                    return false;
+                                }
+                                else
+                                {
+                                    foreach (var file in files)
+                                    {
+                                        if (file.Name.Contains("data"))
+                                        {
+                                            uint value = CalculateCRCValue(file);
+                                            if (value == data.value)
+                                            {
+                                                isValid = true;
+                                            }
+                                            else
+                                            {
+                                                return false;
+                                            }
+                                        }
+                                    }
+                                }
                             }
                             else
                             {
-                                foreach (var file in files)
+                                var files = folder.GetFiles();
+                                if (files.Length < 2)
                                 {
-                                    if (file.Name.Contains("data"))
+                                    return false;
+                                }
+                                else
+                                {
+                                    foreach (var file in files)
                                     {
-                                        uint value = CalculateCRCValue(file);
-                                        if (value == data.value)
+                                        if (file.Name.Contains("data"))
                                         {
-                                            isValid = true;
-                                        }
-                                        else
-                                        {
-                                            return false;
+                                            uint value = CalculateCRCValue(file);
+                                            if (value == data.value)
+                                            {
+                                                isValid = true;
+                                            }
+                                            else
+                                            {
+                                                return false;
+                                            }
                                         }
                                     }
                                 }
