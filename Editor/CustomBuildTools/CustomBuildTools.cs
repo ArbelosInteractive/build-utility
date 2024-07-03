@@ -120,7 +120,9 @@ namespace Arbelos.BuildUtility.Editor
             localHostingService = assetSettings.HostingServicesManager.HostingServices.First();
             if (addressableProfileNames[currentSelectedProfileIndex] == "Deployment")
             {
+#if UNITY_2022_3_OR_NEWER
                 PlayerSettings.insecureHttpOption = InsecureHttpOption.NotAllowed;
+#endif
                 if (localHostingService != null && localHostingService.IsHostingServiceRunning)
                 {
                     localHostingService.StopHostingService();
@@ -128,7 +130,9 @@ namespace Arbelos.BuildUtility.Editor
             }
             else if (addressableProfileNames[currentSelectedProfileIndex] == "EditorHosted")
             {
+#if UNITY_2022_3_OR_NEWER
                 PlayerSettings.insecureHttpOption = InsecureHttpOption.AlwaysAllowed;
+#endif
                 if (localHostingService != null && !localHostingService.IsHostingServiceRunning)
                 {
                     localHostingService.StartHostingService();
@@ -174,7 +178,9 @@ namespace Arbelos.BuildUtility.Editor
                 UpdateAddressableProfileData(addressableProfileNames[currentSelectedProfileIndex], assetSettings.activeProfileId);
                 if (addressableProfileNames[currentSelectedProfileIndex] == "Deployment")
                 {
+#if UNITY_2022_3_OR_NEWER
                     PlayerSettings.insecureHttpOption = InsecureHttpOption.NotAllowed;
+#endif
                     if (localHostingService != null && localHostingService.IsHostingServiceRunning)
                     {
                         localHostingService.StopHostingService();
@@ -182,7 +188,9 @@ namespace Arbelos.BuildUtility.Editor
                 }
                 else if (addressableProfileNames[currentSelectedProfileIndex] == "EditorHosted")
                 {
+#if UNITY_2022_3_OR_NEWER
                     PlayerSettings.insecureHttpOption = InsecureHttpOption.AlwaysAllowed;
+#endif
                     if (localHostingService != null && !localHostingService.IsHostingServiceRunning)
                     {
                         localHostingService.StartHostingService();
