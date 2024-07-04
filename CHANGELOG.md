@@ -43,3 +43,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - ## [1.0.8] - 2024-07-03
 ### Added
 - Unity versions below v2022 won't have PlayerSettings.insecureHttpOption.
+
+- ## [1.0.9] - 2024-07-04
+### Added
+- Add WebGL azure friendly build target case.

@@ -45,6 +45,10 @@ namespace Arbelos.BuildUtility.Editor
                     {
                         return "standalonewindows64";
                     }
+                case BuildTarget.WebGL:
+                    {
+                        return "webgl";
+                    }
                 default:
                     return "android";
 
