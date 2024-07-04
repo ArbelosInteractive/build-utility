@@ -52,6 +52,7 @@ namespace Arbelos.BuildUtility.Editor
 
         //Project Saved Data
         ProjectData currentProjectData = null;
+        private string azureSharedKey = string.Empty;
 
         [MenuItem("Build Utility/Seamless Build")]
         static void OpenWindow()
@@ -76,6 +77,7 @@ namespace Arbelos.BuildUtility.Editor
 
         private void OnDisable()
         {
+            azureSharedKey = string.Empty;
         }
 
         void InitTextures()
@@ -198,6 +200,21 @@ namespace Arbelos.BuildUtility.Editor
                 }
             }
             GUILayout.EndHorizontal();
+
+            if(addressableProfileNames[currentSelectedProfileIndex] == "Deployment")
+            {
+                GUILayout.Space(20);
+
+                GUILayout.BeginHorizontal();
+                GUILayout.Space(20);
+                GUILayout.Label($"Azure Shared Access Key: ", styleSkin.GetStyle("BuildToolLabel"), GUILayout.ExpandWidth(false));
+
+                GUILayout.Space(20);
+
+                azureSharedKey = EditorGUILayout.TextField(azureSharedKey, GUILayout.Height(25), GUILayout.Width(200), GUILayout.ExpandWidth(false));
+
+                GUILayout.EndHorizontal();
+            }
 
             GUILayout.Space(20);
 
@@ -464,7 +481,7 @@ namespace Arbelos.BuildUtility.Editor
 
                 if (addressableProfileNames[currentSelectedProfileIndex] == "Deployment")
                 {
-                    await AzureUtilities.UploadAddressables();
+                    await AzureUtilities.UploadAddressables(azureSharedKey);
                 }
 
                 string path = "";

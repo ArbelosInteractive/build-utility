@@ -8,7 +8,6 @@ namespace Arbelos.BuildUtility.Runtime
     public class ProjectData : ScriptableObject
     {
         public string azureStorageAccountName;
-        public string azureStorageAccountSharedKey;
         public string azureStorageAccountURL;
         public string androidKeyStoreFilePath;
         public string androidKeyStorePassword;

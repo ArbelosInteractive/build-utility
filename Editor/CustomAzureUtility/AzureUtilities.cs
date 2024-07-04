@@ -17,7 +17,7 @@ namespace Arbelos.BuildUtility.Editor
         private static ProjectData currentProjectData = null;
 
         [MenuItem("Build Utility/Addressables/Upload Addressables")]
-        public static async Task UploadAddressables()
+        public static async Task UploadAddressables(string sharedKey)
         {
             localBuildPath = $"{Directory.GetCurrentDirectory()}/ServerData/{EditorUserBuildSettings.activeBuildTarget.ToString()}";
             containerName = CustomAddressableBuild.GetAzureFriendlyBuildTarget();
@@ -29,7 +29,7 @@ namespace Arbelos.BuildUtility.Editor
                 return;
             }
 
-            if (string.IsNullOrEmpty(currentProjectData.azureStorageAccountName) || string.IsNullOrEmpty(currentProjectData.azureStorageAccountSharedKey) || string.IsNullOrEmpty(currentProjectData.azureStorageAccountURL))
+            if (string.IsNullOrEmpty(currentProjectData.azureStorageAccountName) || string.IsNullOrEmpty(sharedKey) || string.IsNullOrEmpty(currentProjectData.azureStorageAccountURL))
             {
                 Debug.LogError("BUILD UTILITY - Project Data file contains null values.");
                 return;
@@ -43,7 +43,7 @@ namespace Arbelos.BuildUtility.Editor
                 byte[] fileData = File.ReadAllBytes(filePath);
                 string dateHeader = DateTime.UtcNow.ToString("R");
                 string contentLength = fileData.Length.ToString();
-                string authorizationHeader = GetAuthorizationHeader("PUT", contentLength, blobName, dateHeader);
+                string authorizationHeader = GetAuthorizationHeader("PUT", contentLength, blobName, dateHeader, sharedKey);
 
                 Debug.Log($"Uploading {blobName} to {uploadUrl}");
                 Debug.Log($"Authorization Header: {authorizationHeader}");
@@ -64,7 +64,7 @@ namespace Arbelos.BuildUtility.Editor
             Debug.Log("Upload complete!");
         }
 
-        private static string GetAuthorizationHeader(string method, string contentLength, string blobName, string date)
+        private static string GetAuthorizationHeader(string method, string contentLength, string blobName, string date, string sharedKey)
         {
             string canonicalizedHeaders = $"x-ms-blob-type:BlockBlob\nx-ms-date:{date}\nx-ms-version:2019-12-12\n";
             string canonicalizedResource = $"/{currentProjectData.azureStorageAccountName}/{containerName}/{blobName}";
@@ -72,7 +72,7 @@ namespace Arbelos.BuildUtility.Editor
             string stringToSign = $"{method}\n\n\n{contentLength}\n\napplication/octet-stream\n\n\n\n\n\n\n{canonicalizedHeaders}{canonicalizedResource}";
             Debug.Log($"String to Sign: {stringToSign}");
 
-            string signature = ComputeHMACSHA256(stringToSign, currentProjectData.azureStorageAccountSharedKey);
+            string signature = ComputeHMACSHA256(stringToSign, sharedKey);
             return $"SharedKey {currentProjectData.azureStorageAccountName}:{signature}";
         }
 

@@ -47,3 +47,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - ## [1.0.9] - 2024-07-04
 ### Added
 - Add WebGL azure friendly build target case.
+
+- ## [1.0.10] - 2024-07-04
+### Added
+- Remove azure shared key saving and input taken when building.
+
