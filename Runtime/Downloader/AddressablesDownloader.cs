@@ -429,8 +429,7 @@ namespace Arbelos.BuildUtility.Runtime
 
             List<DirectoryInfo> assetFolders = FindAssetFolders(_fileIds, _cachePath);
 
-            //TODO: fix this hardcoded value of 2
-            if (assetFolders.Count >= 2)
+            if (assetFolders.Count > 0)
             {
                 foreach (var folder in assetFolders)
                 {

@@ -55,3 +55,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - ## [1.0.11] - 2024-07-09
 ### Added
 - Allow Http Web Request option in build tool and player pref saving.
+
+- ## [1.0.11.1] - 2024-07-09
+### Added
+- Fix Asset File Id Fetcher hard coded count 2.
