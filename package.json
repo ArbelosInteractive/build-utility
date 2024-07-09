@@ -1,13 +1,13 @@
 {
   "name": "com.arbelos.buildutility",
-  "version": "1.0.10",
+  "version": "1.0.11",
   "displayName": "Build Utility",
   "description": "A package of scripts for automated build utility",
   "unity": "2021.3",
   "unityRelease": "3f1",
-  "documentationUrl": "https://example.com/",
-  "changelogUrl": "https://example.com/changelog.html",
-  "licensesUrl": "https://example.com/licensing.html",
+  "documentationUrl": "https://github.com/ArbelosInteractive/build-utility/blob/52de3329f8c8136ea5d4c3539307ebf592f594a0/ArbelosBuildUtility_Guide.pdf",
+  "changelogUrl": "https://github.com/ArbelosInteractive/build-utility/blob/52de3329f8c8136ea5d4c3539307ebf592f594a0/CHANGELOG.md",
+  "licensesUrl": "https://github.com/ArbelosInteractive/build-utility",
   "dependencies": {
     "com.unity.nuget.newtonsoft-json": "2.0.0",
     "com.unity.modules.unitywebrequest": "1.0.0",

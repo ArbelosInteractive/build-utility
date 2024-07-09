@@ -42,6 +42,7 @@ namespace Arbelos.BuildUtility.Editor
 
         //Build Variables
         BuildPlayerOptions customBuildOptions = new BuildPlayerOptions();
+        bool alwaysAllowHTTP = true;
         bool developmentBuild = false;
         bool scriptDebugging = false;
         bool waitForManagedDebugger = false;
@@ -114,6 +115,36 @@ namespace Arbelos.BuildUtility.Editor
 
         void InitAddressableProfileData()
         {
+#if UNITY_2022_3_OR_NEWER
+            var httpSavedOption = PlayerPrefs.GetString("BuildUtility_InsecureHTTPAllowed");
+            if(string.IsNullOrEmpty(httpSavedOption))
+            {
+                alwaysAllowHTTP = true;
+                PlayerPrefs.SetString("BuildUtility_InsecureHTTPAllowed", "true");
+            }
+            else
+            {
+                if(httpSavedOption == "true")
+                {
+                    alwaysAllowHTTP = true;
+                }
+                else if(httpSavedOption == "false")
+                {
+                    alwaysAllowHTTP = false;
+                }
+            }
+
+
+            if(alwaysAllowHTTP)
+            {
+                PlayerSettings.insecureHttpOption = InsecureHttpOption.AlwaysAllowed;
+            }
+            else
+            {
+                PlayerSettings.insecureHttpOption = InsecureHttpOption.NotAllowed;
+            }
+#endif
+
             assetSettings = AddressableAssetSettingsDefaultObject.Settings;
             assetProfileSettings = assetSettings.profileSettings;
             addressableProfileNames = assetProfileSettings.GetAllProfileNames().ToArray();
@@ -123,7 +154,10 @@ namespace Arbelos.BuildUtility.Editor
             if (addressableProfileNames[currentSelectedProfileIndex] == "Deployment")
             {
 #if UNITY_2022_3_OR_NEWER
-                PlayerSettings.insecureHttpOption = InsecureHttpOption.NotAllowed;
+                if(!alwaysAllowHTTP)
+                {
+                    PlayerSettings.insecureHttpOption = InsecureHttpOption.NotAllowed;
+                }
 #endif
                 if (localHostingService != null && localHostingService.IsHostingServiceRunning)
                 {
@@ -133,7 +167,10 @@ namespace Arbelos.BuildUtility.Editor
             else if (addressableProfileNames[currentSelectedProfileIndex] == "EditorHosted")
             {
 #if UNITY_2022_3_OR_NEWER
-                PlayerSettings.insecureHttpOption = InsecureHttpOption.AlwaysAllowed;
+                if (!alwaysAllowHTTP)
+                {
+                    PlayerSettings.insecureHttpOption = InsecureHttpOption.AlwaysAllowed;
+                }
 #endif
                 if (localHostingService != null && !localHostingService.IsHostingServiceRunning)
                 {
@@ -201,7 +238,30 @@ namespace Arbelos.BuildUtility.Editor
             }
             GUILayout.EndHorizontal();
 
-            if(addressableProfileNames[currentSelectedProfileIndex] == "Deployment")
+            GUILayout.Space(20);
+
+            GUILayout.BeginHorizontal();
+            GUILayout.Space(20);
+            GUILayout.Label($"Allow HTTP Calls?: ", styleSkin.GetStyle("BuildToolLabel"), GUILayout.ExpandWidth(false));
+            EditorGUI.BeginChangeCheck();
+            alwaysAllowHTTP = EditorGUILayout.Toggle("", alwaysAllowHTTP);
+            if (EditorGUI.EndChangeCheck())
+            {
+                if(alwaysAllowHTTP)
+                {
+                    PlayerSettings.insecureHttpOption = InsecureHttpOption.AlwaysAllowed;
+                    PlayerPrefs.SetString("BuildUtility_InsecureHTTPAllowed", "true");
+                }
+                else
+                {
+                    PlayerSettings.insecureHttpOption = InsecureHttpOption.NotAllowed;
+                    PlayerPrefs.SetString("BuildUtility_InsecureHTTPAllowed", "false");
+                }
+            }
+
+            GUILayout.EndHorizontal();
+
+            if (addressableProfileNames[currentSelectedProfileIndex] == "Deployment")
             {
                 GUILayout.Space(20);
 
