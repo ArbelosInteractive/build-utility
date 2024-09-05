@@ -73,8 +73,11 @@ namespace Arbelos.BuildUtility.Runtime
 
         public async Task UpdateAndDownload()
         {
+#if UNITY_WEBGL
+            AsyncOperationHandle<List<IResourceLocator>> handle = Addressables.UpdateCatalogs(false, null, false);
+#else
             AsyncOperationHandle<List<IResourceLocator>> handle = Addressables.UpdateCatalogs(true, null, false);
-
+#endif
             await handle.Task;
 
             List<IResourceLocator> updatedResourceLocators = handle.Result;
@@ -207,7 +210,7 @@ namespace Arbelos.BuildUtility.Runtime
 
         private bool ValidateCurrentlyDownloadedFiles()
         {
-#if !UNITY_EDITOR
+#if !UNITY_EDITOR && !UNITY_WEBGL
             //Fetch stored CRC Data when addressables built.
             if (!ValidateCatalogFiles(addressableData.AddressableCRCList))
             {
@@ -217,7 +220,7 @@ namespace Arbelos.BuildUtility.Runtime
                 Debug.Log($"<color=orange>INVALID CATALOG FILES DETECTED!!</color>");
                 return false;
             }
-#if !UNITY_WEBGL
+
             List<string> cachePaths = new List<string>();
             Caching.GetAllCachePaths(cachePaths);
 
@@ -234,7 +237,6 @@ namespace Arbelos.BuildUtility.Runtime
                 Debug.Log($"<color=orange>INVALID GAME FILES DETECTED!!</color>");
                 return false;
             }
-#endif  
 #endif
             return true;
         }
@@ -545,6 +547,7 @@ namespace Arbelos.BuildUtility.Runtime
         {
             //Addressables.ClearDependencyCacheAsync(Addressables.ResourceLocators.FirstOrDefault().LocatorId);
             //Addressables.ClearResourceLocators();
+
 #if !UNITY_WEBGL
             bool cacheCleared = Caching.ClearCache();
             //PurgeCatalogFiles();
