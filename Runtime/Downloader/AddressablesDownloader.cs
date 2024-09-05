@@ -73,8 +73,11 @@ namespace Arbelos.BuildUtility.Runtime
 
         public async Task UpdateAndDownload()
         {
+#if UNITY_WEBGL
+            AsyncOperationHandle<List<IResourceLocator>> handle = Addressables.UpdateCatalogs(false, null, false);
+#else
             AsyncOperationHandle<List<IResourceLocator>> handle = Addressables.UpdateCatalogs(true, null, false);
-
+#endif
             await handle.Task;
 
             List<IResourceLocator> updatedResourceLocators = handle.Result;
@@ -138,10 +141,13 @@ namespace Arbelos.BuildUtility.Runtime
         public async void Initialize()
         {
             //wait for caching to get ready
+
+#if !UNITY_WEBGL
             while (!Caching.ready)
             {
                 await Task.Delay(1000);
             }
+#endif
 
             // Refresh Directories before doing anything
             RefreshCacheAndCatalogDirectories();
@@ -204,7 +210,7 @@ namespace Arbelos.BuildUtility.Runtime
 
         private bool ValidateCurrentlyDownloadedFiles()
         {
-#if !UNITY_EDITOR
+#if !UNITY_EDITOR && !UNITY_WEBGL
             //Fetch stored CRC Data when addressables built.
             if (!ValidateCatalogFiles(addressableData.AddressableCRCList))
             {
@@ -321,6 +327,7 @@ namespace Arbelos.BuildUtility.Runtime
             }
 
             //Refresh Cache Directory
+#if !UNITY_WEBGL
             List<string> cachePaths = new List<string>();
             Caching.GetAllCachePaths(cachePaths);
             string cachePath = cachePaths[0];
@@ -329,6 +336,7 @@ namespace Arbelos.BuildUtility.Runtime
                 DirectoryInfo dir = new DirectoryInfo(cachePath);
                 dir.Refresh();
             }
+#endif
         }
 
         private List<string> FetchGameAssetsFileIds(List<AddressableCRCEntry> _data)
@@ -540,8 +548,10 @@ namespace Arbelos.BuildUtility.Runtime
             //Addressables.ClearDependencyCacheAsync(Addressables.ResourceLocators.FirstOrDefault().LocatorId);
             //Addressables.ClearResourceLocators();
 
+#if !UNITY_WEBGL
             bool cacheCleared = Caching.ClearCache();
             //PurgeCatalogFiles();
+#endif
         }
 
         private void PurgeCatalogFiles()
