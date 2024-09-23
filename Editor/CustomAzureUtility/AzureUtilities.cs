@@ -46,8 +46,6 @@ namespace Arbelos.BuildUtility.Editor
                 string authorizationHeader = GetAuthorizationHeader("PUT", contentLength, blobName, dateHeader, sharedKey);
 
                 Debug.Log($"Uploading {blobName} to {uploadUrl}");
-                Debug.Log($"Authorization Header: {authorizationHeader}");
-                Debug.Log($"Date Header: {dateHeader}");
 
                 UnityWebRequest request = new UnityWebRequest(uploadUrl, "PUT");
                 request.uploadHandler = new UploadHandlerRaw(fileData);
@@ -70,7 +68,6 @@ namespace Arbelos.BuildUtility.Editor
             string canonicalizedResource = $"/{currentProjectData.azureStorageAccountName}/{containerName}/{blobName}";
 
             string stringToSign = $"{method}\n\n\n{contentLength}\n\napplication/octet-stream\n\n\n\n\n\n\n{canonicalizedHeaders}{canonicalizedResource}";
-            Debug.Log($"String to Sign: {stringToSign}");
 
             string signature = ComputeHMACSHA256(stringToSign, sharedKey);
             return $"SharedKey {currentProjectData.azureStorageAccountName}:{signature}";

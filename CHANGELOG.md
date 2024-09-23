@@ -59,3 +59,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - ## [1.0.12] - 2024-07-09
 ### Added
 - Fix Asset File Id Fetcher hard coded count 2.
+
+- ## [1.0.13] - 2024-09-23
+### Updated
+- Updated Addressable Profile Check to make it less restrictive and consider any profile created.
+- Removed unnecessary debugs.

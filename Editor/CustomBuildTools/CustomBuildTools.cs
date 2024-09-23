@@ -151,7 +151,7 @@ namespace Arbelos.BuildUtility.Editor
             var activeProfileName = assetProfileSettings.GetProfileName(assetSettings.activeProfileId);
             currentSelectedProfileIndex = Array.IndexOf(addressableProfileNames, activeProfileName);
             localHostingService = assetSettings.HostingServicesManager.HostingServices.First();
-            if (addressableProfileNames[currentSelectedProfileIndex] == "Deployment")
+            if (addressableProfileNames[currentSelectedProfileIndex] != "EditorHosted")
             {
 #if UNITY_2022_3_OR_NEWER
                 if(!alwaysAllowHTTP)
@@ -164,7 +164,7 @@ namespace Arbelos.BuildUtility.Editor
                     localHostingService.StopHostingService();
                 }
             }
-            else if (addressableProfileNames[currentSelectedProfileIndex] == "EditorHosted")
+            else
             {
 #if UNITY_2022_3_OR_NEWER
                 if (!alwaysAllowHTTP)
@@ -215,7 +215,7 @@ namespace Arbelos.BuildUtility.Editor
                 assetSettings.activeProfileId = assetProfileSettings.GetProfileId(addressableProfileNames[currentSelectedProfileIndex]);
                 assetSettings.SetDirty(AddressableAssetSettings.ModificationEvent.ActiveProfileSet, null, true, true);
                 UpdateAddressableProfileData(addressableProfileNames[currentSelectedProfileIndex], assetSettings.activeProfileId);
-                if (addressableProfileNames[currentSelectedProfileIndex] == "Deployment")
+                if (addressableProfileNames[currentSelectedProfileIndex] != "EditorHosted")
                 {
 #if UNITY_2022_3_OR_NEWER
                     PlayerSettings.insecureHttpOption = InsecureHttpOption.NotAllowed;
@@ -225,7 +225,7 @@ namespace Arbelos.BuildUtility.Editor
                         localHostingService.StopHostingService();
                     }
                 }
-                else if (addressableProfileNames[currentSelectedProfileIndex] == "EditorHosted")
+                else
                 {
 #if UNITY_2022_3_OR_NEWER
                     PlayerSettings.insecureHttpOption = InsecureHttpOption.AlwaysAllowed;
@@ -261,7 +261,7 @@ namespace Arbelos.BuildUtility.Editor
 
             GUILayout.EndHorizontal();
 
-            if (addressableProfileNames[currentSelectedProfileIndex] == "Deployment")
+            if (addressableProfileNames[currentSelectedProfileIndex] != "EditorHosted")
             {
                 GUILayout.Space(20);
 
@@ -539,7 +539,7 @@ namespace Arbelos.BuildUtility.Editor
 
                 await BuildAddressables();
 
-                if (addressableProfileNames[currentSelectedProfileIndex] == "Deployment")
+                if (addressableProfileNames[currentSelectedProfileIndex] != "EditorHosted")
                 {
                     await AzureUtilities.UploadAddressables(azureSharedKey);
                 }

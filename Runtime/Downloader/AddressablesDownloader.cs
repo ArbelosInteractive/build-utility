@@ -158,7 +158,7 @@ namespace Arbelos.BuildUtility.Runtime
             if (addressableData != null && !String.IsNullOrEmpty(addressableData.profileName))
             {
                 var profileType = addressableData.profileName;
-                if (profileType == "Deployment")
+                if (profileType != "EditorHosted")
                 {
                     AsyncOperationHandle<List<string>> catalogHandle = Addressables.CheckForCatalogUpdates(false);
 
@@ -185,7 +185,7 @@ namespace Arbelos.BuildUtility.Runtime
                         onInitialized?.Invoke();
                     }
                 }
-                else if (profileType == "EditorHosted")
+                else
                 {
                     isInitialized = true;
                     onInitialized?.Invoke();
