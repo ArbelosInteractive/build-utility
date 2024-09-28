@@ -1,3 +1,4 @@
+using System;
 using System.Collections.Generic;
 using System.IO;
 using System.Threading.Tasks;
@@ -11,7 +12,6 @@ using Force.Crc32;
 using Newtonsoft.Json;
 using Arbelos.BuildUtility.Runtime;
 using static UnityEditor.AddressableAssets.Settings.AddressableAssetProfileSettings;
-
 
 namespace Arbelos.BuildUtility.Editor
 {
@@ -62,14 +62,17 @@ namespace Arbelos.BuildUtility.Editor
             }
         }
 
-        public static async Task GenerateCRCValues()
+        public static async Task GenerateCRCValues(string addressablesBuildPath = null)
         {
-            string currentBuildTarget = EditorUserBuildSettings.activeBuildTarget.ToString();
-            string path = Application.dataPath + "/../ServerData/" + currentBuildTarget;
-            
-            if (Directory.Exists(path))
+            if (addressablesBuildPath == null)
             {
-                DirectoryInfo dir = new DirectoryInfo(path);
+                string currentBuildTarget = EditorUserBuildSettings.activeBuildTarget.ToString();
+                addressablesBuildPath = Application.dataPath + "/../ServerData/" + currentBuildTarget;
+            }
+
+            if (Directory.Exists(addressablesBuildPath))
+            {
+                DirectoryInfo dir = new DirectoryInfo(addressablesBuildPath);
                 GameAddressableData data = Resources.Load<GameAddressableData>("GameAddressableData");
                 data.AddressableCRCList.Clear();
 
@@ -87,7 +90,32 @@ namespace Arbelos.BuildUtility.Editor
 
         }
         
-        
-        
+        public static void SwitchCurrentAddressablesProfileByName(string profileName)
+       {
+           AddressableAssetSettings assetSettings;
+           AddressableAssetProfileSettings assetProfileSettings;
+           
+           //Initialize asset settings and asset profile settings
+           assetSettings = AddressableAssetSettingsDefaultObject.Settings;
+           assetProfileSettings = assetSettings.profileSettings;
+           
+           //First Validate if the given named addressable profile exists or not
+           if (!assetProfileSettings.GetAllProfileNames().Contains(profileName))
+           {
+               throw new Exception($"No Addressable Profile exists that goes by name: {profileName}. Please enter the correct name.");
+           }
+           
+           assetSettings.activeProfileId = assetProfileSettings.GetProfileId(profileName);
+           assetSettings.SetDirty(AddressableAssetSettings.ModificationEvent.ActiveProfileSet, null, true, true);
+           
+           //Update profile info in game asset file as well.
+           GameAddressableData profileData = Resources.Load<GameAddressableData>("GameAddressableData");
+           profileData.profileName = profileName;
+           profileData.profileId = assetSettings.activeProfileId;
+           EditorUtility.SetDirty(profileData);
+           AssetDatabase.Refresh();
+           Debug.Log("<color=orange>Finished Saving Addressable Game Data file with updated profile info</color>");
+       }
+       
     }
 }

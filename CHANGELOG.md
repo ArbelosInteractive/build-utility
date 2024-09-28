@@ -64,3 +64,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 ### Updated
 - Updated Addressable Profile Check to make it less restrictive and consider any profile created.
 - Removed unnecessary debugs.
+
+- ## [1.0.14] - 2024-09-28
+### Updated
+- Add custom function to switch addressable profiles by name.
+- Add functionality to pass custom addressable build path when calling GenerateCRCValues function.
