@@ -73,3 +73,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - ## [1.0.15] - 2024-09-28
 ### Updated
 - Add custom function to load custom content catalog using a remote path string.
+
+- ## [1.0.16] - 2024-09-29
+### Updated
+- UI Buttons to Only Build Addressables or Build and Upload Addressables.

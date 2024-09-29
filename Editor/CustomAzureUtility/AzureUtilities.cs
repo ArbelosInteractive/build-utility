@@ -15,8 +15,7 @@ namespace Arbelos.BuildUtility.Editor
         private static string containerName = "";
         private static string localBuildPath = "";
         private static ProjectData currentProjectData = null;
-
-        [MenuItem("Build Utility/Addressables/Upload Addressables")]
+        
         public static async Task UploadAddressables(string sharedKey)
         {
             localBuildPath = $"{Directory.GetCurrentDirectory()}/ServerData/{EditorUserBuildSettings.activeBuildTarget.ToString()}";

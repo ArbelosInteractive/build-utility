@@ -463,7 +463,29 @@ namespace Arbelos.BuildUtility.Editor
                 }
             }
             GUILayout.EndHorizontal();
+            
+            GUILayout.Space(20);
 
+            GUILayout.BeginHorizontal();
+            GUILayout.Space(20);
+            if (GUILayout.Button("Build and Upload Addressables", GUILayout.Height(35), GUILayout.Width(200), GUILayout.ExpandWidth(false)))
+            {
+               StartBuildAndUploadAddressables();
+            }
+            
+            GUILayout.EndHorizontal();
+            
+            GUILayout.Space(20);
+            
+            GUILayout.BeginHorizontal();
+            GUILayout.Space(20);
+            if (GUILayout.Button("Only Build Addressables", GUILayout.Height(35), GUILayout.Width(200), GUILayout.ExpandWidth(false)))
+            {
+                StartOnlyAddressablesBuild();
+            }
+            
+            GUILayout.EndHorizontal();
+            
             GUILayout.EndVertical();
             GUILayout.EndArea();
         }
@@ -525,6 +547,54 @@ namespace Arbelos.BuildUtility.Editor
         private void StartBuild()
         {
             EditorApplication.update += BuildPlayer;
+        }
+
+        private void StartOnlyAddressablesBuild()
+        {
+            EditorApplication.update += OnlyBuildAddressables;
+        }
+        
+        private void StartBuildAndUploadAddressables()
+        {
+            if (String.IsNullOrEmpty(azureSharedKey))
+            {
+                Debug.LogError("Please enter a azure shared key in order to upload the addressables.");
+                return;
+            }
+            EditorApplication.update += OnlyBuildAndUploadAddressables;
+        }
+
+        private async void OnlyBuildAndUploadAddressables()
+        {
+            if (!isBuilding)
+            {
+                isBuilding = true; 
+                
+                EditorApplication.update -= OnlyBuildAndUploadAddressables;
+
+                await BuildAddressables();
+                
+                if (addressableProfileNames[currentSelectedProfileIndex] != "EditorHosted")
+                {
+                    await AzureUtilities.UploadAddressables(azureSharedKey);
+                }
+                
+                isBuilding = false;
+            }
+        }
+
+        private async void OnlyBuildAddressables()
+        {
+            if (!isBuilding)
+            {
+                isBuilding = true; 
+                
+                EditorApplication.update -= OnlyBuildAddressables;
+
+                await BuildAddressables();
+                
+                isBuilding = false;
+            }
         }
 
         private async void BuildPlayer()

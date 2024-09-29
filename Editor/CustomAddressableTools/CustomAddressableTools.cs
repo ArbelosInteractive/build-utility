@@ -17,7 +17,6 @@ namespace Arbelos.BuildUtility.Editor
 {
     public class CustomAddressableTools
     {
-        [MenuItem("Build Utility/Addressables/Build Addressables")]
         public static async Task BuildAddressables()
         {
             // Deletes Old Addressables
@@ -46,8 +45,7 @@ namespace Arbelos.BuildUtility.Editor
             
             await GenerateCRCValues();
         }
-
-        [MenuItem("Build Utility/Addressables/Update a previous build")]
+        
         public static void AzureFriendlyUpdatePreviousBuild()
         {
             var path = ContentUpdateScript.GetContentStateDataPath(true);
