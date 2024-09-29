@@ -69,3 +69,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 ### Updated
 - Add custom function to switch addressable profiles by name.
 - Add functionality to pass custom addressable build path when calling GenerateCRCValues function.
+
+- ## [1.0.15] - 2024-09-28
+### Updated
+- Add custom function to load custom content catalog using a remote path string.

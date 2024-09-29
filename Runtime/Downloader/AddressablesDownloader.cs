@@ -24,6 +24,7 @@ namespace Arbelos.BuildUtility.Runtime
         public UnityEvent onInitialized;
         public UnityEvent onUpdateAvailable;
         public UnityEvent onValidationFail;
+        public UnityEvent onCustomContentCatalogLoaded;
         public GameAddressableData addressableData;
         #endregion
 
@@ -575,6 +576,32 @@ namespace Arbelos.BuildUtility.Runtime
                     }
                 }
             }
+        }
+        
+        public async void LoadCustomContentCatalog(string remotePath)
+        {
+            if (string.IsNullOrEmpty(remotePath))
+            {
+                Debug.LogError("No remotePath when trying to load addressable");
+                return;
+            }
+
+            //Load a catalog from sever and automatically release the operation handle.
+            AsyncOperationHandle <IResourceLocator> handle
+                = Addressables.LoadContentCatalogAsync(remotePath, false);
+            
+            await handle.Task;
+                
+            if (handle.Status == AsyncOperationStatus.Succeeded)
+            {
+                onCustomContentCatalogLoaded?.Invoke();
+            }
+            else if (handle.Status == AsyncOperationStatus.Failed)
+            {
+                Debug.LogError($"Loading Custom Content Catalog failed: {remotePath}");
+            }
+                
+            Addressables.Release(handle);
         }
     }
 }
