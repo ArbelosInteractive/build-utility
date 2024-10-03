@@ -77,3 +77,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - ## [1.0.16] - 2024-09-29
 ### Updated
 - UI Buttons to Only Build Addressables or Build and Upload Addressables.
+
+- ## [1.0.17] - 2024-10-03
+### Updated
+- Update Switch Profile By Name Function to load all resources to find profile data
