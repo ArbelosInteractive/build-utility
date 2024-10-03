@@ -107,8 +107,7 @@ namespace Arbelos.BuildUtility.Editor
            assetSettings.SetDirty(AddressableAssetSettings.ModificationEvent.ActiveProfileSet, null, true, true);
            
            //Update profile info in game asset file as well.
-           var profileDatas = Resources.LoadAll<GameAddressableData>("GameAddressableData");
-           GameAddressableData profileData = profileDatas.First();
+           GameAddressableData profileData = Resources.Load<GameAddressableData>("GameAddressableData");
            profileData.profileName = profileName;
            profileData.profileId = assetSettings.activeProfileId;
            EditorUtility.SetDirty(profileData);
