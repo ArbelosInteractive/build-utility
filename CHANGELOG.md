@@ -81,3 +81,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - ## [1.0.17] - 2024-10-04
 ### Updated
 - Update SwitchAddressableProfile by name to load all resources.
+
+- ## [1.0.18] - 2024-10-04
+### Updated
+- Add missing using directive.
