@@ -108,14 +108,67 @@ namespace Arbelos.BuildUtility.Editor
            assetSettings.SetDirty(AddressableAssetSettings.ModificationEvent.ActiveProfileSet, null, true, true);
            
             //Update profile info in game asset file as well.
-            var profileDatas = Resources.LoadAll<GameAddressableData>("GameAddressableData").ToList();
-            GameAddressableData profileData = profileDatas[0];
+           GameAddressableData profileData = Resources.Load<GameAddressableData>("GameAddressableData");
            profileData.profileName = profileName;
            profileData.profileId = assetSettings.activeProfileId;
            EditorUtility.SetDirty(profileData);
            AssetDatabase.Refresh();
            Debug.Log("<color=orange>Finished Saving Addressable Game Data file with updated profile info</color>");
        }
+        
+        public static async Task CloudBuild_GenerateCRCValues(string addressablesBuildPath = null)
+        {
+            if (addressablesBuildPath == null)
+            {
+                string currentBuildTarget = EditorUserBuildSettings.activeBuildTarget.ToString();
+                addressablesBuildPath = Application.dataPath + "/../ServerData/" + currentBuildTarget;
+            }
+
+            if (Directory.Exists(addressablesBuildPath))
+            {
+                DirectoryInfo dir = new DirectoryInfo(addressablesBuildPath);
+                GameAddressableData data = (GameAddressableData)AssetDatabase.LoadAssetAtPath("Assets/Resources/GameAddressableData.asset", typeof(GameAddressableData));
+                data.AddressableCRCList.Clear();
+
+                FileInfo[] files = dir.GetFiles();
+
+                for (int i = 0; i < files.Length; i++)
+                {
+                    var fromFileBytes = await File.ReadAllBytesAsync(files[i].FullName);
+                    data.AddressableCRCList.Add(new AddressableCRCEntry(files[i].Name, Crc32CAlgorithm.Compute(fromFileBytes)));
+                }
+                EditorUtility.SetDirty(data);
+                AssetDatabase.Refresh();
+                Debug.Log("<color=orange>Finished Saving Addressable Game Data file with updated CRC List</color>");
+            }
+
+        }
+        public static void CloudBuild_SwitchAddressablesProfileByName(string profileName)
+        {
+            AddressableAssetSettings assetSettings;
+            AddressableAssetProfileSettings assetProfileSettings;
+           
+            //Initialize asset settings and asset profile settings
+            assetSettings = AddressableAssetSettingsDefaultObject.Settings;
+            assetProfileSettings = assetSettings.profileSettings;
+           
+            //First Validate if the given named addressable profile exists or not
+            if (!assetProfileSettings.GetAllProfileNames().Contains(profileName))
+            {
+                throw new Exception($"No Addressable Profile exists that goes by name: {profileName}. Please enter the correct name.");
+            }
+           
+            assetSettings.activeProfileId = assetProfileSettings.GetProfileId(profileName);
+            assetSettings.SetDirty(AddressableAssetSettings.ModificationEvent.ActiveProfileSet, null, true, true);
+           
+            //Update profile info in game asset file as well.
+            GameAddressableData profileData = (GameAddressableData)AssetDatabase.LoadAssetAtPath("Assets/Resources/GameAddressableData.asset", typeof(GameAddressableData));
+            profileData.profileName = profileName;
+            profileData.profileId = assetSettings.activeProfileId;
+            EditorUtility.SetDirty(profileData);
+            AssetDatabase.Refresh();
+            Debug.Log("<color=orange>Finished Saving Addressable Game Data file with updated profile info</color>");
+        }
        
     }
 }
