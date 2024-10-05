@@ -141,8 +141,12 @@ namespace Arbelos.BuildUtility.Editor
                 AssetDatabase.Refresh();
                 Debug.Log("<color=orange>Finished Saving Addressable Game Data file with updated CRC List</color>");
             }
-
+            else
+            {
+                Debug.Log($"<color=orange>No addressable build path found: {addressablesBuildPath}</color>");
+            }
         }
+        
         public static void CloudBuild_SwitchAddressablesProfileByName(string profileName)
         {
             AddressableAssetSettings assetSettings;

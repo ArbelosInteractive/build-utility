@@ -89,3 +89,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - ## [1.0.19] - 2024-10-04
 ### Updated
 - Add cloud build functions using LoadAssetAtPath.
+
+- ## [1.0.20] - 2024-10-05
+### Updated
+- No addressable build path found helper log.
