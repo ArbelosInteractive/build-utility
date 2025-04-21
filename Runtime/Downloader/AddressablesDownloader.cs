@@ -25,6 +25,7 @@ namespace Arbelos.BuildUtility.Runtime
         public UnityEvent onUpdateAvailable;
         public UnityEvent onValidationFail;
         public UnityEvent onCustomContentCatalogLoaded;
+        public UnityEvent<float> onPercentageDownloaded;
         public GameAddressableData addressableData;
         #endregion
 
@@ -119,7 +120,7 @@ namespace Arbelos.BuildUtility.Runtime
                         await Task.Yield();
                         var status = keyDownloadOperation.GetDownloadStatus();
                         percentageDownloaded = status.Percent * 100.0f;
-
+                        onPercentageDownloaded?.Invoke(percentageDownloaded);
                         //if (ui != null)
                         //{
                         //    ui.UpdateProgressText(percent);
