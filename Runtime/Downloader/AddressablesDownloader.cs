@@ -10,6 +10,7 @@ using Force.Crc32;
 using UnityEngine.ResourceManagement.AsyncOperations;
 using Newtonsoft.Json;
 using System;
+using System.Collections;
 
 namespace Arbelos.BuildUtility.Runtime
 {
@@ -27,7 +28,62 @@ namespace Arbelos.BuildUtility.Runtime
         public UnityEvent onCustomContentCatalogLoaded;
         public UnityEvent<float> onPercentageDownloaded;
         public GameAddressableData addressableData;
+
+        private List<object> downloadedKeys = new();
+        private List<object> pendingKeys = new();
+        private bool wasConnected;
+        
         #endregion
+        
+        void OnApplicationPause(bool pauseStatus)
+        {
+            if (isInitialized)
+                return;
+            
+            if (pauseStatus)
+            {
+                Debug.Log("App paused (device may be sleeping or switching apps)");
+            }
+            else
+            {
+                Debug.Log("App resumed");
+                ResumePendingDownload();
+            }
+        }
+
+        void OnApplicationFocus(bool hasFocus)
+        {
+            if (isInitialized)
+                return;
+            
+            if (!hasFocus)
+            {
+                Debug.Log("App lost focus (possibly screen off or user switched apps)");
+            }
+            else
+            {
+                Debug.Log("App regained focus");
+                ResumePendingDownload();
+            }
+        }
+        
+        IEnumerator CheckInternet()
+        {
+            while (!isInitialized)
+            {
+                bool isConnected = Application.internetReachability != NetworkReachability.NotReachable;
+                if (isConnected != wasConnected)
+                {
+                    if (isConnected)
+                        Debug.Log("Internet connected");
+                    else
+                        Debug.Log("Internet disconnected");
+
+                    wasConnected = isConnected;
+                }
+                yield return new WaitForSeconds(5f); // check every 5 seconds
+            }
+        }
 
         protected static float BytesToKiloBytes(long bytes)
         {
@@ -82,6 +138,9 @@ namespace Arbelos.BuildUtility.Runtime
             List<IResourceLocator> updatedResourceLocators = handle.Result;
 
             Addressables.Release(handle);
+            
+            pendingKeys.Clear();
+            downloadedKeys.Clear();
 
             if (updatedResourceLocators != null)
             {
@@ -95,50 +154,17 @@ namespace Arbelos.BuildUtility.Runtime
                     allKeys.Append(updatedResourceLocators[i].Keys);
                 }
 
-                numAssetBundlesToDownload = allKeys.ToList().Count;
-                numDownloaded = 0;
+                pendingKeys = allKeys.ToList();
 
-                foreach (var key in allKeys)
-                {
-                    numDownloaded++;
-
-                    //if (ui != null)
-                    //{
-                    //    ui.UpdateDownloadsText($"downloading ... {numDownloaded}/{numAssetBundlesToDownload}");
-                    //}
-
-
-                    var keyDownloadSizeKb = BytesToKiloBytes(await Addressables.GetDownloadSizeAsync(key).Task);
-                    if (keyDownloadSizeKb <= 0)
-                    {
-                        continue;
-                    }
-
-                    var keyDownloadOperation = Addressables.DownloadDependenciesAsync(key);
-                    while (!keyDownloadOperation.IsDone)
-                    {
-                        await Task.Yield();
-                        var status = keyDownloadOperation.GetDownloadStatus();
-                        percentageDownloaded = status.Percent * 100.0f;
-                        onPercentageDownloaded?.Invoke(percentageDownloaded);
-                        //if (ui != null)
-                        //{
-                        //    ui.UpdateProgressText(percent);
-                        //}
-                    }
-
-                    if (keyDownloadOperation.IsDone)
-                    {
-                        //Release the operation handle once a key has been downloaded
-                        Addressables.Release(keyDownloadOperation);
-                    }
-                }
-                Debug.Log("all downloads completed");
+                await DownloadKeysAsync(pendingKeys);
             }
         }
 
         public async void Initialize()
         {
+            wasConnected = Application.internetReachability != NetworkReachability.NotReachable;
+            StartCoroutine(CheckInternet());
+            
             //wait for caching to get ready
             while (!Caching.ready)
             {
@@ -244,6 +270,10 @@ namespace Arbelos.BuildUtility.Runtime
 
             //ClearPreviousCatalog();
             var existingLocators = Addressables.ResourceLocators.ToList();
+
+            pendingKeys.Clear();
+            downloadedKeys.Clear();
+
             //List<IResourceLocator> updatedResourceLocators = await Addressables.UpdateCatalogs(true);
 
             if (existingLocators != null)
@@ -254,47 +284,24 @@ namespace Arbelos.BuildUtility.Runtime
                 {
                     allKeys.Append(existingLocators[i].Keys);
                 }
+                
+                pendingKeys = allKeys.ToList();
 
-                numAssetBundlesToDownload = allKeys.ToList().Count;
-                numDownloaded = 0;
+                await DownloadKeysAsync(pendingKeys);
 
-                foreach (var key in allKeys)
+                //validate files
+                if (ValidateCurrentlyDownloadedFiles())
                 {
-                    numDownloaded++;
-
-                    //if (ui != null)
-                    //{
-                    //    ui.UpdateDownloadsText($"downloading ... {numDownloaded}/{numAssetBundlesToDownload}");
-                    //}
-
-
-                    var keyDownloadSizeKb = BytesToKiloBytes(await Addressables.GetDownloadSizeAsync(key).Task);
-                    if (keyDownloadSizeKb <= 0)
-                    {
-                        continue;
-                    }
-
-                    var keyDownloadOperation = Addressables.DownloadDependenciesAsync(key);
-                    while (!keyDownloadOperation.IsDone)
-                    {
-                        await Task.Yield();
-                        var status = keyDownloadOperation.GetDownloadStatus();
-                        percentageDownloaded = status.Percent * 100.0f;
-
-                        //if (ui != null)
-                        //{
-                        //    ui.UpdateProgressText(percent);
-                        //}
-                    }
-
-                    if (keyDownloadOperation.IsDone)
-                    {
-                        //Release the operation handle once a key has been downloaded
-                        Addressables.Release(keyDownloadOperation);
-                    }
+                    isInitialized = true;
+                    onInitialized?.Invoke();
                 }
-                Debug.Log("all downloads completed");
             }
+        }
+
+        private async void ResumePendingDownload()
+        {
+            await DownloadKeysAsync(pendingKeys);
+
             //validate files
             if (ValidateCurrentlyDownloadedFiles())
             {
@@ -310,7 +317,52 @@ namespace Arbelos.BuildUtility.Runtime
             RedownloadGameFiles();
         }
 
+        private async Task DownloadKeysAsync(List<object> _keys)
+        {
+            numAssetBundlesToDownload = pendingKeys.Count + downloadedKeys.Count;
+            numDownloaded = downloadedKeys.Count;
 
+            foreach (var key in _keys)
+            {
+                numDownloaded++;
+
+                //if (ui != null)
+                //{
+                //    ui.UpdateDownloadsText($"downloading ... {numDownloaded}/{numAssetBundlesToDownload}");
+                //}
+
+                var keyDownloadSizeKb = BytesToKiloBytes(await Addressables.GetDownloadSizeAsync(key).Task);
+                if (keyDownloadSizeKb <= 0)
+                {
+                    continue;
+                }
+
+                var keyDownloadOperation = Addressables.DownloadDependenciesAsync(key);
+                while (!keyDownloadOperation.IsDone)
+                {
+                    await Task.Yield();
+                    var status = keyDownloadOperation.GetDownloadStatus();
+                    percentageDownloaded = status.Percent * 100.0f;
+
+                    //if (ui != null)
+                    //{
+                    //    ui.UpdateProgressText(percent);
+                    //}
+                }
+
+                if (keyDownloadOperation.IsDone)
+                {
+                    //Update pending and downloaded keys list
+                    pendingKeys.Remove(key);
+                    downloadedKeys.Add(key);
+                        
+                    //Release the operation handle once a key has been downloaded
+                    Addressables.Release(keyDownloadOperation);
+                }
+            }
+            Debug.Log("all downloads completed");
+        }
+        
         private void RefreshCacheAndCatalogDirectories()
         {
             //Refresh the catalog directory.
@@ -369,8 +421,7 @@ namespace Arbelos.BuildUtility.Runtime
             }
             return _assetsFileIds;
         }
-
-
+        
         private bool ValidateCatalogFiles(List<AddressableCRCEntry> _data)
         {
             ClearPreviousCatalog();

@@ -97,3 +97,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - ## [1.0.21] - 2025-04-21
 ### Updated
 - Addressables Downloader - Percentage Updated Unity Event Addition.
+
+- ## [1.0.22] - 2025-04-23
+### Updated
+- Addressables Downloader - Improved Download Logic where interruptions are accounted for and downloads are resumed in that case.
