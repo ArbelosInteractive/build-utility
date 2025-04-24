@@ -75,9 +75,14 @@ namespace Arbelos.BuildUtility.Runtime
                 if (isConnected != wasConnected)
                 {
                     if (isConnected)
+                    {                    
                         Debug.Log("Internet connected");
+                        ResumePendingDownload();    
+                    }
                     else
+                    {
                         Debug.Log("Internet disconnected");
+                    }
 
                     wasConnected = isConnected;
                 }
@@ -322,7 +327,10 @@ namespace Arbelos.BuildUtility.Runtime
             numAssetBundlesToDownload = pendingKeys.Count + downloadedKeys.Count;
             numDownloaded = downloadedKeys.Count;
 
-            foreach (var key in _keys)
+            //Use a separate list to iterate through, so we don't modify the same one inside the loop
+            var keysToDownload = _keys;
+
+            foreach (var key in keysToDownload)
             {
                 numDownloaded++;
 

@@ -101,3 +101,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - ## [1.0.22] - 2025-04-23
 ### Updated
 - Addressables Downloader - Improved Download Logic where interruptions are accounted for and downloads are resumed in that case.
+
+- ## [1.0.23] - 2025-04-24
+### Fixed
+- Addressables Downloader - Fixed DownloadKeysAsync to use a new list to iterate through and modify pending and downloaded key list inside the iteration
