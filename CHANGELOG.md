@@ -105,3 +105,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - ## [1.0.23] - 2025-04-24
 ### Fixed
 - Addressables Downloader - Fixed DownloadKeysAsync to use a new list to iterate through and modify pending and downloaded key list inside the iteration
+
+- ## [1.0.24] - 2025-04-25
+### Fixed
+- Addressables Downloader - Convert into array to use as new iteration instead of list.

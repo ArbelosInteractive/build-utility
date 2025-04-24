@@ -328,9 +328,7 @@ namespace Arbelos.BuildUtility.Runtime
             numDownloaded = downloadedKeys.Count;
 
             //Use a separate list to iterate through, so we don't modify the same one inside the loop
-            var keysToDownload = _keys;
-
-            foreach (var key in keysToDownload)
+            foreach (var key in _keys.ToArray())
             {
                 numDownloaded++;
 
