@@ -109,3 +109,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - ## [1.0.24] - 2025-04-25
 ### Fixed
 - Addressables Downloader - Convert into array to use as new iteration instead of list.
+
+- ## [1.0.25] - 2025-04-25
+### Fixed
+- Addressables Downloader - Fix percentage downloaded event not being invoked on asset download.

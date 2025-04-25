@@ -32,38 +32,50 @@ namespace Arbelos.BuildUtility.Runtime
         private List<object> downloadedKeys = new();
         private List<object> pendingKeys = new();
         private bool wasConnected;
+        private bool wasPaused;
+        private bool hadFocus;
+        //Used to track that initial addressables initialization code has been run.
+        private bool addressablesInitialized;
         
         #endregion
         
         void OnApplicationPause(bool pauseStatus)
         {
-            if (isInitialized)
+            if (isInitialized || !addressablesInitialized)
                 return;
-            
-            if (pauseStatus)
+
+            if (pauseStatus != wasPaused)
             {
-                Debug.Log("App paused (device may be sleeping or switching apps)");
-            }
-            else
-            {
-                Debug.Log("App resumed");
-                ResumePendingDownload();
+                if (pauseStatus)
+                {
+                    Debug.Log("App paused (device may be sleeping or switching apps)");
+                }
+                else
+                {
+                    Debug.Log("App resumed");
+                    ResumePendingDownload();
+                }
+                wasPaused = pauseStatus;
             }
         }
 
         void OnApplicationFocus(bool hasFocus)
         {
-            if (isInitialized)
+            if (isInitialized || !addressablesInitialized)
                 return;
-            
-            if (!hasFocus)
+
+            if (hasFocus != hadFocus)
             {
-                Debug.Log("App lost focus (possibly screen off or user switched apps)");
-            }
-            else
-            {
-                Debug.Log("App regained focus");
-                ResumePendingDownload();
+                if (!hasFocus)
+                {
+                    Debug.Log("App lost focus (possibly screen off or user switched apps)");
+                }
+                else
+                {
+                    Debug.Log("App regained focus");
+                    ResumePendingDownload();
+                }
+                hadFocus = hasFocus;
             }
         }
         
@@ -71,6 +83,9 @@ namespace Arbelos.BuildUtility.Runtime
         {
             while (!isInitialized)
             {
+                if(!addressablesInitialized)
+                    continue;
+                
                 bool isConnected = Application.internetReachability != NetworkReachability.NotReachable;
                 if (isConnected != wasConnected)
                 {
@@ -184,6 +199,8 @@ namespace Arbelos.BuildUtility.Runtime
             AsyncOperationHandle<IResourceLocator> handle = Addressables.InitializeAsync(false);
 
             await handle.Task;
+
+            addressablesInitialized = true;
 
             Addressables.Release(handle);
 #if !UNITY_EDITOR
@@ -349,7 +366,7 @@ namespace Arbelos.BuildUtility.Runtime
                     await Task.Yield();
                     var status = keyDownloadOperation.GetDownloadStatus();
                     percentageDownloaded = status.Percent * 100.0f;
-
+                    onPercentageDownloaded.Invoke(percentageDownloaded);
                     //if (ui != null)
                     //{
                     //    ui.UpdateProgressText(percent);
