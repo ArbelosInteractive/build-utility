@@ -83,8 +83,10 @@ namespace Arbelos.BuildUtility.Runtime
         {
             while (!isInitialized)
             {
-                if(!addressablesInitialized)
-                    continue;
+                if (!addressablesInitialized)
+                {
+                    yield return new WaitForSeconds(5f); // check every 5 seconds
+                }
                 
                 bool isConnected = Application.internetReachability != NetworkReachability.NotReachable;
                 if (isConnected != wasConnected)
@@ -101,6 +103,7 @@ namespace Arbelos.BuildUtility.Runtime
 
                     wasConnected = isConnected;
                 }
+                
                 yield return new WaitForSeconds(5f); // check every 5 seconds
             }
         }

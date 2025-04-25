@@ -113,3 +113,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - ## [1.0.25] - 2025-04-25
 ### Fixed
 - Addressables Downloader - Fix percentage downloaded event not being invoked on asset download.
+
+- ## [1.0.26] - 2025-04-25
+### Fixed
+- Addressables Downloader - While Loop fix
