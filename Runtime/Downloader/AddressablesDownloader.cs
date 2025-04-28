@@ -393,7 +393,7 @@ namespace Arbelos.BuildUtility.Runtime
             }
             catch (Exception ex)
             {
-                Debug.LogError($"[Addressables Downloader] Error - {ex}");
+                Debug.LogError($"[Addressables Downloader] Error - {ex.Message}");
             }
         }
         
