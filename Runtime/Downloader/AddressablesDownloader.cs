@@ -344,49 +344,57 @@ namespace Arbelos.BuildUtility.Runtime
 
         private async Task DownloadKeysAsync(List<object> _keys)
         {
-            numAssetBundlesToDownload = pendingKeys.Count + downloadedKeys.Count;
-            numDownloaded = downloadedKeys.Count;
-
-            //Use a separate list to iterate through, so we don't modify the same one inside the loop
-            foreach (var key in _keys.ToArray())
+            try
             {
-                numDownloaded++;
+                numAssetBundlesToDownload = pendingKeys.Count + downloadedKeys.Count;
+                numDownloaded = downloadedKeys.Count;
 
-                //if (ui != null)
-                //{
-                //    ui.UpdateDownloadsText($"downloading ... {numDownloaded}/{numAssetBundlesToDownload}");
-                //}
-
-                var keyDownloadSizeKb = BytesToKiloBytes(await Addressables.GetDownloadSizeAsync(key).Task);
-                if (keyDownloadSizeKb <= 0)
+                //Use a separate list to iterate through, so we don't modify the same one inside the loop
+                foreach (var key in _keys.ToArray())
                 {
-                    continue;
-                }
+                    numDownloaded++;
 
-                var keyDownloadOperation = Addressables.DownloadDependenciesAsync(key);
-                while (!keyDownloadOperation.IsDone)
-                {
-                    await Task.Yield();
-                    var status = keyDownloadOperation.GetDownloadStatus();
-                    percentageDownloaded = status.Percent * 100.0f;
-                    onPercentageDownloaded.Invoke(percentageDownloaded);
                     //if (ui != null)
                     //{
-                    //    ui.UpdateProgressText(percent);
+                    //    ui.UpdateDownloadsText($"downloading ... {numDownloaded}/{numAssetBundlesToDownload}");
                     //}
+
+                    var keyDownloadSizeKb = BytesToKiloBytes(await Addressables.GetDownloadSizeAsync(key).Task);
+                    if (keyDownloadSizeKb <= 0)
+                    {
+                        continue;
+                    }
+
+                    var keyDownloadOperation = Addressables.DownloadDependenciesAsync(key);
+                    while (!keyDownloadOperation.IsDone)
+                    {
+                        await Task.Yield();
+                        var status = keyDownloadOperation.GetDownloadStatus();
+                        percentageDownloaded = status.Percent * 100.0f;
+                        onPercentageDownloaded.Invoke(percentageDownloaded);
+                        //if (ui != null)
+                        //{
+                        //    ui.UpdateProgressText(percent);
+                        //}
+                    }
+
+                    if (keyDownloadOperation.IsDone)
+                    {
+                        //Update pending and downloaded keys list
+                        pendingKeys.Remove(key);
+                        downloadedKeys.Add(key);
+
+                        //Release the operation handle once a key has been downloaded
+                        Addressables.Release(keyDownloadOperation);
+                    }
                 }
 
-                if (keyDownloadOperation.IsDone)
-                {
-                    //Update pending and downloaded keys list
-                    pendingKeys.Remove(key);
-                    downloadedKeys.Add(key);
-                        
-                    //Release the operation handle once a key has been downloaded
-                    Addressables.Release(keyDownloadOperation);
-                }
+                Debug.Log("all downloads completed");
             }
-            Debug.Log("all downloads completed");
+            catch (Exception ex)
+            {
+                Debug.LogError($"[Addressables Downloader] Error - {ex}");
+            }
         }
         
         private void RefreshCacheAndCatalogDirectories()
