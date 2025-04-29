@@ -121,3 +121,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - ## [1.0.27] - 2025-04-28
 ### Fixed
 - Addressables Downloader - Catch errors
+
+- ## [1.0.28] - 2025-04-29
+### Fixed
+- Addressables Downloader - Working download resume.
