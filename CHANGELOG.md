@@ -125,3 +125,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - ## [1.0.28] - 2025-04-29
 ### Fixed
 - Addressables Downloader - Working download resume.
+
+- ## [1.0.29] - 2025-05-02
+### Fixed
+- Addressables Downloader - Fix multiple download calls being cancelled and add a 3 sec delay to resume download.

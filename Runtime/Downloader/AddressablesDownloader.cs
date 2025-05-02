@@ -34,12 +34,13 @@ namespace Arbelos.BuildUtility.Runtime
         private List<object> pendingKeys = new();
         private bool wasConnected = true;
         private bool wasPaused;
-        private CancellationTokenSource downloadCancellationTokenSource;
         private bool hasError = false;
         
         //Used to track that initial addressables initialization code has been run.
         private bool addressablesInitialized;
         private bool downloadInitialized;
+        
+        private CancellationTokenSource downloadCancellationTokenSource;
         
         #endregion
         
@@ -50,16 +51,17 @@ namespace Arbelos.BuildUtility.Runtime
 
             if (pauseStatus != wasPaused && wasConnected)
             {
+                wasPaused = pauseStatus;
                 if (pauseStatus)
                 {
                     Debug.Log("App paused (device may be sleeping or switching apps)");
+                    downloadCancellationTokenSource?.Cancel();
                 }
                 else
                 {
                     Debug.Log("App resumed");
                     ResumePendingDownload();
                 }
-                wasPaused = pauseStatus;
             }
         }
         
@@ -76,6 +78,7 @@ namespace Arbelos.BuildUtility.Runtime
                 bool isConnected = Application.internetReachability != NetworkReachability.NotReachable;
                 if (isConnected != wasConnected)
                 {
+                    wasConnected = isConnected;
                     if (isConnected)
                     {                    
                         Debug.Log("Internet connected");
@@ -84,9 +87,8 @@ namespace Arbelos.BuildUtility.Runtime
                     else
                     {
                         Debug.Log("Internet disconnected");
+                        downloadCancellationTokenSource?.Cancel();
                     }
-
-                    wasConnected = isConnected;
                 }
                 
                 yield return new WaitForSeconds(5f); // check every 5 seconds
@@ -217,6 +219,7 @@ namespace Arbelos.BuildUtility.Runtime
                     else
                     {
                         Debug.Log("No update available");
+                        downloadDone = true;
                     }
 
                     downloadInitialized = true;
@@ -316,13 +319,17 @@ namespace Arbelos.BuildUtility.Runtime
         private async void ResumePendingDownload()
         {
             Debug.Log($"[Addressables Downloader] Resuming Download...");
-            
-            //Cancel existing download first
-            // Cancel the token
-            if (downloadCancellationTokenSource != null && !downloadCancellationTokenSource.IsCancellationRequested)
+
+            if (downloadCancellationTokenSource != null)
             {
-                downloadCancellationTokenSource.Cancel();
+                if(!downloadCancellationTokenSource.IsCancellationRequested)
+                    downloadCancellationTokenSource?.Cancel();
+                //Delay for 3 seonds before resuming.
+                await Task.Delay(3000);
             }
+
+            //Remove any stragglers already existing in downloaded keys.
+            pendingKeys = pendingKeys.Distinct().Except(downloadedKeys).ToList();
             
             var downloadDone = await DownloadKeysAsync(pendingKeys);
 
@@ -346,74 +353,101 @@ namespace Arbelos.BuildUtility.Runtime
             hasError = false;
             downloadCancellationTokenSource = new CancellationTokenSource();
             var token = downloadCancellationTokenSource.Token;
-
+            
             try
             {
+                token.ThrowIfCancellationRequested();
+                
+                Debug.Log($"[Addressables Downloader] Pending #Keys: {pendingKeys.Count} | Downloaded #Keys: {downloadedKeys.Count}");
+
+                if (hasError || wasPaused || !wasConnected)
+                {
+                    Debug.Log("[Addressables Downloader] Exiting Download...Either has error, paused or not connected.");
+                    return false;
+                }
+                
                 numAssetBundlesToDownload = pendingKeys.Count + downloadedKeys.Count;
                 numDownloaded = downloadedKeys.Count;
 
                 foreach (var key in _keys.ToArray())
                 {
-                    token.ThrowIfCancellationRequested(); 
+                    token.ThrowIfCancellationRequested();
+                
+                    if (hasError || wasPaused || !wasConnected)
+                    {
+                        Debug.Log("[Addressables Downloader] Exiting Download...Either has error, paused or not connected.");
+                        return false;
+                    }
                     
-                    if (hasError) break;
+                    // Force remove cached content for the key if it already exists
+                    var clearOperation = Addressables.ClearDependencyCacheAsync(key, false);
 
+                    await clearOperation.Task;
+
+                    if (clearOperation.Status == AsyncOperationStatus.Succeeded)
+                    {
+                        Debug.Log($"[Addressables Downloader] Cleared cache for key: {key}");
+                        Addressables.Release(clearOperation);
+                    }
+                    else
+                    {
+                        Debug.Log($"[Addressables Downloader] Failed to clear cache for key: {key}. Will still attempt download.");
+                        Addressables.Release(clearOperation);
+                    }
+                    
                     var keyDownloadOperation = Addressables.DownloadDependenciesAsync(key);
 
                     await keyDownloadOperation.Task;
 
                     if (keyDownloadOperation.Status == AsyncOperationStatus.Succeeded)
                     {
-                        pendingKeys.Remove(key);
+                        token.ThrowIfCancellationRequested();
+                        
+                        if (hasError || wasPaused || !wasConnected)
+                        {
+                            Debug.Log("[Addressables Downloader] Exiting Download...Either has error, paused or not connected.");
+                            return false;
+                        }
+                        
+                        if(!pendingKeys.Remove(key))
+                            Debug.Log($"[Addressables Downloader] {key} Key was not removed from Pending Keys");
+                        
                         downloadedKeys.Add(key);
                     }
                     else
                     {
-                        throw new Exception($"Download failed for key: {key}");
+                        hasError = true;
+                        Debug.LogError($"Download failed for key: {key}");
+                        Addressables.Release(keyDownloadOperation);
+                        continue;
                     }
 
-                    Addressables.Release(keyDownloadOperation);
+                    Addressables.Release(keyDownloadOperation); 
                     
                     numDownloaded++;
                     
                     percentageDownloaded = (float)numDownloaded / numAssetBundlesToDownload;
                     percentageDownloaded *= 100f;
                     
-                    Debug.Log($"[Addressables Downloader] Downloading Assets - {percentageDownloaded} % complete.");
+                    Debug.Log($"[Addressables Downloader] Downloading Assets - {percentageDownloaded} % complete - {numDownloaded}/{numAssetBundlesToDownload} downloaded.");
+                    Debug.Log($"[Addressables Downloader] [Download Iteration] Pending #Keys: {pendingKeys.Count} | Downloaded #Keys: {downloadedKeys.Count}");
                     onPercentageDownloaded?.Invoke(percentageDownloaded);
                 }
 
-                if (!hasError && !token.IsCancellationRequested)
+                if (!hasError && !wasPaused && wasConnected)
                 {
                     Debug.Log("All downloads completed successfully.");
                     return true;
                 }
-            }
-            catch (OperationCanceledException)
-            {
-                Debug.LogWarning("[Addressables Downloader] Download cancelled by user or system.");
+                
                 return false;
             }
             catch (Exception ex)
             {
                 hasError = true;
-
-                // Cancel the token if any unexpected error occurs
-                if (downloadCancellationTokenSource != null && !downloadCancellationTokenSource.IsCancellationRequested)
-                {
-                    downloadCancellationTokenSource.Cancel();
-                }
-
                 Debug.LogError($"[Addressables Downloader] Error - {ex.Message}");
                 return false;
             }
-            finally
-            {
-                downloadCancellationTokenSource?.Dispose();
-                downloadCancellationTokenSource = null;
-            }
-
-            return true;
         }
         
         private void RefreshCacheAndCatalogDirectories()
