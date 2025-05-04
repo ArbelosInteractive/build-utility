@@ -129,3 +129,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - ## [1.0.29] - 2025-05-02
 ### Fixed
 - Addressables Downloader - Fix multiple download calls being cancelled and add a 3 sec delay to resume download.
+
+- ## [1.0.30] - 2025-05-04
+### Fixed
+- Addressables Downloader - Proper release of addressables async operation handles.
