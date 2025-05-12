@@ -138,3 +138,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 ### Fixed
 - Addressables Downloader - Update download coroutine handling and set result if stopped. 
 - Remove unused function.
+
+- ## [1.0.32] - 2025-05-12
+### Fixed
+- Addressables Downloader - Lots of addressables asset validation logs.

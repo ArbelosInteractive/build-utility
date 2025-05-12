@@ -126,6 +126,13 @@ namespace Arbelos.BuildUtility.Runtime
                         file.Delete();
                     }
                 }
+                else
+                {
+                    if(files.Length == 1)
+                        Debug.LogError("[AddressablesDownloader] No Previous Catalog Hash file found. Only one exists.");
+                    else
+                        Debug.LogError("[AddressablesDownloader] No Catalog Hash files found. Zero exists.");
+                }
 
                 //now the json files
                 FileInfo[] jsonfiles = dir.GetFiles("catalog*.json").OrderByDescending(p => p.LastWriteTime).ToArray();
@@ -140,6 +147,17 @@ namespace Arbelos.BuildUtility.Runtime
                         file.Delete();
                     }
                 }
+                else
+                {
+                    if(jsonfiles.Length == 1)
+                        Debug.LogError("[AddressablesDownloader] No Previous Catalog JSON file found. Only one exists.");
+                    else
+                        Debug.LogError("[AddressablesDownloader] No Catalog JSON files found. Zero exists.");
+                }
+            }
+            else
+            {
+                Debug.LogError("[Addressables Downloader] No catalog cache directory found!");
             }
         }
 
@@ -243,7 +261,7 @@ namespace Arbelos.BuildUtility.Runtime
                     downloadInitialized = true;
 
                     //validate files
-                    if (ValidateCurrentlyDownloadedFiles() && downloadDone)
+                    if (downloadDone && ValidateCurrentlyDownloadedFiles())
                     {
                         isInitialized = true;
                         onInitialized?.Invoke();
@@ -339,7 +357,7 @@ namespace Arbelos.BuildUtility.Runtime
                 var downloadDone = await tcs.Task;
 
                 //validate files
-                if (ValidateCurrentlyDownloadedFiles() && downloadDone)
+                if (downloadDone && ValidateCurrentlyDownloadedFiles())
                 {
                     isInitialized = true;
                     onInitialized?.Invoke();
@@ -371,7 +389,7 @@ namespace Arbelos.BuildUtility.Runtime
             var downloadDone = await tcs.Task;
 
             //validate files
-            if (ValidateCurrentlyDownloadedFiles() && downloadDone)
+            if (downloadDone && ValidateCurrentlyDownloadedFiles())
             {
                 isInitialized = true;
                 onInitialized?.Invoke();
@@ -611,6 +629,7 @@ namespace Arbelos.BuildUtility.Runtime
                             }
                             else
                             {
+                                Debug.LogError($"[Addressables Downloader] Catalog File: {data.key} is invalid.");
                                 return false;
                             }
                         }
@@ -622,6 +641,7 @@ namespace Arbelos.BuildUtility.Runtime
                             }
                             else
                             {
+                                Debug.LogError($"[Addressables Downloader] Catalog File: {data.key} is invalid.");
                                 return false;
                             }
                         }
@@ -629,9 +649,11 @@ namespace Arbelos.BuildUtility.Runtime
                 }
                 else
                 {
+                    Debug.LogError("[Addressables Downloader] No catalog JSON and HASH Files Found");
                     return false;
                 }
             }
+            Debug.LogError("[Addressables Downloader] No catalog cache directory found!");
             return isValid;
         }
 
@@ -656,6 +678,7 @@ namespace Arbelos.BuildUtility.Runtime
                                 var files = subDirs.First().GetFiles();
                                 if (files.Length < 2)
                                 {
+                                    Debug.LogError($"[Addressables Downloader] No minimum required amount of files (2) found under the sub direc. folder of key: {data.key}");
                                     return false;
                                 }
                                 else
@@ -671,6 +694,7 @@ namespace Arbelos.BuildUtility.Runtime
                                             }
                                             else
                                             {
+                                                Debug.LogError($"[Addressables Downloader] CRC Check failed for {data.key} key. File is invalid.");
                                                 return false;
                                             }
                                         }
@@ -682,6 +706,7 @@ namespace Arbelos.BuildUtility.Runtime
                                 var files = folder.GetFiles();
                                 if (files.Length < 2)
                                 {
+                                    Debug.LogError($"[Addressables Downloader] No minimum required amount of files (2) found under the folder of key: {data.key}");
                                     return false;
                                 }
                                 else
@@ -697,6 +722,7 @@ namespace Arbelos.BuildUtility.Runtime
                                             }
                                             else
                                             {
+                                                Debug.LogError($"[Addressables Downloader] CRC Check failed for {data.key} key. File is invalid.");
                                                 return false;
                                             }
                                         }
@@ -709,6 +735,7 @@ namespace Arbelos.BuildUtility.Runtime
             }
             else
             {
+                Debug.LogError("[Addressables Downloader] No game file asset folders found!");
                 return false;
             }
 
