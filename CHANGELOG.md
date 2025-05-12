@@ -133,3 +133,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - ## [1.0.30] - 2025-05-04
 ### Fixed
 - Addressables Downloader - Proper release of addressables async operation handles.
+
+- ## [1.0.31] - 2025-05-12
+### Fixed
+- Addressables Downloader - Update download coroutine handling and set result if stopped. 
+- Remove unused function.

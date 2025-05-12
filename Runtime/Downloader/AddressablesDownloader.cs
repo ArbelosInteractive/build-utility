@@ -39,7 +39,7 @@ namespace Arbelos.BuildUtility.Runtime
         //Used to track that initial addressables initialization code has been run.
         private bool addressablesInitialized;
         private bool downloadInitialized;
-        private Coroutine downloadCoroutine;
+        private Dictionary<TaskCompletionSource<bool>, Coroutine> downloadCoroutine = new();
         private AsyncOperationHandle downloadHandle;
         private AsyncOperationHandle clearHandle;
         private AsyncOperationHandle<long> downloadSizeHandle;
@@ -170,19 +170,19 @@ namespace Arbelos.BuildUtility.Runtime
 
                 pendingKeys = allKeys.ToList();
 
-                if (downloadCoroutine != null)
+                if (downloadCoroutine != null && downloadCoroutine.Count >  0)
                 {
-                    StopCoroutine(downloadCoroutine);
-                    downloadCoroutine = null;
+                    StopCoroutine(downloadCoroutine.First().Value);
+                    downloadCoroutine.First().Key.SetResult(false);
+                    downloadCoroutine.Clear();
                     StopDownloadHandles();
                 }
 
                 // Await a coroutine using TaskCompletionSource
                 var tcs = new TaskCompletionSource<bool>();
-                downloadCoroutine = StartCoroutine(DownloadKeysCoroutine(pendingKeys, success =>
-                {
-                    tcs.SetResult(success);
-                }));
+                if (downloadCoroutine != null)
+                    downloadCoroutine.Add(tcs,
+                        StartCoroutine(DownloadKeysCoroutine(pendingKeys, success => { tcs.SetResult(success); })));
 
                 return await tcs.Task;
             }
@@ -233,7 +233,6 @@ namespace Arbelos.BuildUtility.Runtime
                     {
                         Debug.Log("Update available");
                         downloadDone = await UpdateAndDownload();
-                        await UpdateCatalogs();
                     }
                     else
                     {
@@ -310,8 +309,7 @@ namespace Arbelos.BuildUtility.Runtime
 
             pendingKeys.Clear();
             downloadedKeys.Clear();
-
-            //List<IResourceLocator> updatedResourceLocators = await Addressables.UpdateCatalogs(true);
+            
 
             if (existingLocators != null)
             {
@@ -324,23 +322,21 @@ namespace Arbelos.BuildUtility.Runtime
                 
                 pendingKeys = allKeys.ToList();
 
-                if (downloadCoroutine != null)
+                if (downloadCoroutine != null && downloadCoroutine.Count >  0)
                 {
-                    StopCoroutine(downloadCoroutine);
-                    downloadCoroutine = null;
+                    StopCoroutine(downloadCoroutine.First().Value);
+                    downloadCoroutine.First().Key.SetResult(false);
+                    downloadCoroutine.Clear();
                     StopDownloadHandles();
                 }
-                
+
                 // Await a coroutine using TaskCompletionSource
                 var tcs = new TaskCompletionSource<bool>();
-                downloadCoroutine = StartCoroutine(DownloadKeysCoroutine(pendingKeys, success =>
-                {
-                    tcs.SetResult(success);
-                }));
+                if (downloadCoroutine != null)
+                    downloadCoroutine.Add(tcs,
+                        StartCoroutine(DownloadKeysCoroutine(pendingKeys, success => { tcs.SetResult(success); })));
 
                 var downloadDone = await tcs.Task;
-
-                await UpdateCatalogs();
 
                 //validate files
                 if (ValidateCurrentlyDownloadedFiles() && downloadDone)
@@ -358,23 +354,21 @@ namespace Arbelos.BuildUtility.Runtime
             //Remove any stragglers already existing in downloaded keys.
             pendingKeys = pendingKeys.Distinct().Except(downloadedKeys).ToList();
 
-            if (downloadCoroutine != null)
+            if (downloadCoroutine != null && downloadCoroutine.Count >  0)
             {
-                StopCoroutine(downloadCoroutine);
-                downloadCoroutine = null;
+                StopCoroutine(downloadCoroutine.First().Value);
+                downloadCoroutine.First().Key.SetResult(false);
+                downloadCoroutine.Clear();
                 StopDownloadHandles();
             }
-            
+
             // Await a coroutine using TaskCompletionSource
             var tcs = new TaskCompletionSource<bool>();
-            downloadCoroutine = StartCoroutine(DownloadKeysCoroutine(pendingKeys, success =>
-            {
-                tcs.SetResult(success);
-            }));
+            if (downloadCoroutine != null)
+                downloadCoroutine.Add(tcs,
+                    StartCoroutine(DownloadKeysCoroutine(pendingKeys, success => { tcs.SetResult(success); })));
 
             var downloadDone = await tcs.Task;
-
-            await UpdateCatalogs();
 
             //validate files
             if (ValidateCurrentlyDownloadedFiles() && downloadDone)
@@ -400,6 +394,7 @@ namespace Arbelos.BuildUtility.Runtime
             {
                 Debug.Log("[Addressables Downloader] Exiting Download...Either has error, paused or not connected.");
                 onComplete?.Invoke(false);
+                downloadCoroutine.Clear();
                 yield break;
             }
 
@@ -412,6 +407,7 @@ namespace Arbelos.BuildUtility.Runtime
                 {
                     Debug.Log("[Addressables Downloader] Exiting Download...Either cancelled, error, paused or not connected.");
                     onComplete?.Invoke(false);
+                    downloadCoroutine.Clear();
                     yield break;
                 }
 
@@ -502,8 +498,9 @@ namespace Arbelos.BuildUtility.Runtime
 
                 result = true;
             }
-
+            
             onComplete?.Invoke(result);
+            downloadCoroutine.Clear();
         }
         
         private void RefreshCacheAndCatalogDirectories()
@@ -526,28 +523,6 @@ namespace Arbelos.BuildUtility.Runtime
                 DirectoryInfo dir = new DirectoryInfo(cachePath);
                 dir.Refresh();
             }
-        }
-
-        private async Task UpdateCatalogs()
-        {
-            // Debug.Log("[Addressables Downloader] Re-initializing Addressables...");
-            //
-            // await Task.Delay(100); // Wait a little before reinitializing
-            //
-            // RefreshCacheAndCatalogDirectories();
-            //
-            // var initHandle = Addressables.InitializeAsync(false);
-            // await initHandle.Task;
-            //
-            // if (initHandle.Status == AsyncOperationStatus.Succeeded)
-            // {
-            //     Debug.Log("[Addressables Downloader] Addressables reinitialized successfully.");
-            //     Addressables.Release(initHandle);
-            //     return;
-            // }
-            //
-            // Debug.LogError("[Addressables Downloader] Failed to reinitialize Addressables.");
-            // Addressables.Release(initHandle);
         }
 
         private void StopDownloadHandles()
