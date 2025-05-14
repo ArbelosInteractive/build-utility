@@ -104,8 +104,17 @@ namespace Arbelos.BuildUtility.Runtime
             return bytes / 1024f;
         }
 
-        protected static void ClearPreviousCatalog()
+        protected void ClearPreviousCatalog()
         {
+            if (addressableData == null)
+            {
+                Debug.LogError("[Addressables Downloader] No Addressables Data was found");
+                return;
+            }
+
+            var dataCatalogHash = addressableData.AddressableCRCList.Find(x => x.key.Contains(".hash"));
+            var dataCatalogJson = addressableData.AddressableCRCList.Find(x => x.key.Contains(".json"));
+            
             string path = Application.persistentDataPath + "/com.unity.addressables/";
             if (Directory.Exists(path))
             {
@@ -113,46 +122,71 @@ namespace Arbelos.BuildUtility.Runtime
                 //Refresh the directory before checking again.
                 dir.Refresh();
 
-                //first the hash files
-                FileInfo[] files = dir.GetFiles("catalog*.hash").OrderByDescending(p => p.LastWriteTime).ToArray();
-
-                if (files.Length > 1)
+                //first get all the hash files
+                FileInfo[] allHashFiles = dir.GetFiles("catalog*.hash").OrderByDescending(p => p.LastWriteTime).ToArray();
+                
+                //Get the current addressable data hash file
+                string hashFilePath = Path.Combine(dir.FullName, dataCatalogHash.key);
+                FileInfo currentHashFile = null;
+                if (File.Exists(hashFilePath))
                 {
-                    //skip the first file we want to keep it
-                    for (int i = 1; i < files.Length; i++)
+                    currentHashFile = new FileInfo(hashFilePath);
+                }
+                else
+                {
+                    Debug.Log($"[Addressables Downloader] Current Catalog Hash File not found: {hashFilePath}, new will be created.");
+                }
+                if (allHashFiles.Length > 1)
+                {
+                    //delete every other file except the current addressable data catalog hash file
+                    for (int i = 0; i < allHashFiles.Length; i++)
                     {
-                        FileInfo file = files[i];
-                        Debug.Log($"deleted: {file.Name}");
+                        if (currentHashFile != null && allHashFiles[i] == currentHashFile) continue;
+                        FileInfo file = allHashFiles[i];
+                        Debug.Log($"[Addressables Downloader] Catalog Hash File Deleted: {file.Name}");
                         file.Delete();
                     }
                 }
                 else
                 {
-                    if(files.Length == 1)
-                        Debug.LogError("[AddressablesDownloader] No Previous Catalog Hash file found. Only one exists.");
+                    if(allHashFiles.Length == 1)
+                        Debug.Log("[AddressablesDownloader] No Previous Catalog Hash file found. Only one exists.");
                     else
                         Debug.LogError("[AddressablesDownloader] No Catalog Hash files found. Zero exists.");
                 }
 
-                //now the json files
-                FileInfo[] jsonfiles = dir.GetFiles("catalog*.json").OrderByDescending(p => p.LastWriteTime).ToArray();
-
-                if (jsonfiles.Length > 1)
+                //now get all the json files
+                FileInfo[] allJsonFiles = dir.GetFiles("catalog*.json").OrderByDescending(p => p.LastWriteTime).ToArray();
+                
+                //Get the current addressable data json file
+                string jsonFilePath = Path.Combine(dir.FullName, dataCatalogJson.key);
+                FileInfo currentJsonFile = null;
+                if (File.Exists(jsonFilePath))
                 {
-                    //skip the first file we want to keep it
-                    for (int i = 1; i < jsonfiles.Length; i++)
+                    currentJsonFile = new FileInfo(jsonFilePath);
+                }
+                else
+                {
+                    Debug.Log($"[Addressables Downloader] Current Catalog Json File not found: {jsonFilePath}, new will be created.");
+                }
+
+                if (allJsonFiles.Length > 1)
+                {
+                    //delete every other file except the current addressable data catalog json file
+                    for (int i = 0; i < allJsonFiles.Length; i++)
                     {
-                        FileInfo file = jsonfiles[i];
-                        Debug.Log($"deleted: {file.Name}");
+                        if (currentJsonFile != null && allJsonFiles[i] == currentJsonFile) continue;
+                        FileInfo file = allJsonFiles[i];
+                        Debug.Log($"[Addressables Downloader] Catalog Json File Deleted: {file.Name}");
                         file.Delete();
                     }
                 }
                 else
                 {
-                    if(jsonfiles.Length == 1)
-                        Debug.LogError("[AddressablesDownloader] No Previous Catalog JSON file found. Only one exists.");
+                    if(allJsonFiles.Length == 1)
+                        Debug.Log("[AddressablesDownloader] No Previous Catalog Json file found. Only one exists.");
                     else
-                        Debug.LogError("[AddressablesDownloader] No Catalog JSON files found. Zero exists.");
+                        Debug.LogError("[AddressablesDownloader] No Catalog Json files found. Zero exists.");
                 }
             }
             else
@@ -218,7 +252,10 @@ namespace Arbelos.BuildUtility.Runtime
             {
                 await Task.Delay(1000);
             }
-
+            
+#if !UNITY_EDITOR
+            addressableData = Resources.Load<GameAddressableData>("GameAddressableData");
+#endif
             // Refresh Directories before doing anything
             RefreshCacheAndCatalogDirectories();
 
@@ -232,7 +269,6 @@ namespace Arbelos.BuildUtility.Runtime
 
             Addressables.Release(handle);
 #if !UNITY_EDITOR
-            addressableData = Resources.Load<GameAddressableData>("GameAddressableData");
             if (addressableData != null && !String.IsNullOrEmpty(addressableData.profileName))
             {
                 var profileType = addressableData.profileName;
@@ -653,7 +689,10 @@ namespace Arbelos.BuildUtility.Runtime
                     return false;
                 }
             }
-            Debug.LogError("[Addressables Downloader] No catalog cache directory found!");
+            else
+            {
+                Debug.LogError("[Addressables Downloader] No catalog cache directory found!");
+            }
             return isValid;
         }
 
