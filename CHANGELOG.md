@@ -150,3 +150,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - ## [1.0.34] - 2025-05-15
 ### Updated
 - BuildUtility - CRC32 Plugin removal.
+
+- ## [1.0.35] - 2025-05-15
+### Updated
+- BuildUtility - CRC32 Plugin Reimport
