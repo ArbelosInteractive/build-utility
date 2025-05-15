@@ -97,3 +97,52 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - ## [1.0.21] - 2025-04-21
 ### Updated
 - Addressables Downloader - Percentage Updated Unity Event Addition.
+
+- ## [1.0.22] - 2025-04-23
+### Updated
+- Addressables Downloader - Improved Download Logic where interruptions are accounted for and downloads are resumed in that case.
+
+- ## [1.0.23] - 2025-04-24
+### Fixed
+- Addressables Downloader - Fixed DownloadKeysAsync to use a new list to iterate through and modify pending and downloaded key list inside the iteration
+
+- ## [1.0.24] - 2025-04-25
+### Fixed
+- Addressables Downloader - Convert into array to use as new iteration instead of list.
+
+- ## [1.0.25] - 2025-04-25
+### Fixed
+- Addressables Downloader - Fix percentage downloaded event not being invoked on asset download.
+
+- ## [1.0.26] - 2025-04-25
+### Fixed
+- Addressables Downloader - While Loop fix
+
+- ## [1.0.27] - 2025-04-28
+### Fixed
+- Addressables Downloader - Catch errors
+
+- ## [1.0.28] - 2025-04-29
+### Fixed
+- Addressables Downloader - Working download resume.
+
+- ## [1.0.29] - 2025-05-02
+### Fixed
+- Addressables Downloader - Fix multiple download calls being cancelled and add a 3 sec delay to resume download.
+
+- ## [1.0.30] - 2025-05-04
+### Fixed
+- Addressables Downloader - Proper release of addressables async operation handles.
+
+- ## [1.0.31] - 2025-05-12
+### Fixed
+- Addressables Downloader - Update download coroutine handling and set result if stopped. 
+- Remove unused function.
+
+- ## [1.0.32] - 2025-05-12
+### Fixed
+- Addressables Downloader - Lots of addressables asset validation logs.
+
+- ## [1.0.33] - 2025-05-14
+### Fixed
+- Addressables Downloader - Updated Addressables - Clear Previous Catalog Function to use current addressables data to get latest catalog file.

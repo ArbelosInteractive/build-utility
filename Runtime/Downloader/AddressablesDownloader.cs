@@ -10,6 +10,8 @@ using Force.Crc32;
 using UnityEngine.ResourceManagement.AsyncOperations;
 using Newtonsoft.Json;
 using System;
+using System.Collections;
+using System.Threading;
 
 namespace Arbelos.BuildUtility.Runtime
 {
@@ -27,15 +29,92 @@ namespace Arbelos.BuildUtility.Runtime
         public UnityEvent onCustomContentCatalogLoaded;
         public UnityEvent<float> onPercentageDownloaded;
         public GameAddressableData addressableData;
+
+        private List<object> downloadedKeys = new();
+        private List<object> pendingKeys = new();
+        private bool wasConnected = true;
+        private bool wasPaused;
+        private bool hasError = false;
+        
+        //Used to track that initial addressables initialization code has been run.
+        private bool addressablesInitialized;
+        private bool downloadInitialized;
+        private Dictionary<TaskCompletionSource<bool>, Coroutine> downloadCoroutine = new();
+        private AsyncOperationHandle downloadHandle;
+        private AsyncOperationHandle clearHandle;
+        private AsyncOperationHandle<long> downloadSizeHandle;
+        
         #endregion
+        
+        void OnApplicationPause(bool pauseStatus)
+        {
+            if (isInitialized || !addressablesInitialized)
+                return;
+
+            if (pauseStatus != wasPaused && wasConnected)
+            {
+                wasPaused = pauseStatus;
+                if (pauseStatus)
+                {
+                    Debug.Log("App paused (device may be sleeping or switching apps)");
+                    StopAllCoroutines();
+                    StopDownloadHandles();
+                }
+                else
+                {
+                    Debug.Log("App resumed");
+                    ResumePendingDownload();
+                }
+            }
+        }
+        
+        IEnumerator CheckInternet()
+        {
+            while (!isInitialized)
+            {
+                //Waits for addressables and first download to initialize
+                if (!addressablesInitialized || !downloadInitialized)
+                {
+                    yield return new WaitForSeconds(5f); // check every 5 seconds
+                }
+                
+                bool isConnected = Application.internetReachability != NetworkReachability.NotReachable;
+                if (isConnected != wasConnected)
+                {
+                    wasConnected = isConnected;
+                    if (isConnected)
+                    {                    
+                        Debug.Log("Internet connected");
+                        ResumePendingDownload();    
+                    }
+                    else
+                    {
+                        Debug.Log("Internet disconnected");
+                        StopAllCoroutines();
+                        StopDownloadHandles();
+                    }
+                }
+                
+                yield return new WaitForSeconds(5f); // check every 5 seconds
+            }
+        }
 
         protected static float BytesToKiloBytes(long bytes)
         {
             return bytes / 1024f;
         }
 
-        protected static void ClearPreviousCatalog()
+        protected void ClearPreviousCatalog()
         {
+            if (addressableData == null)
+            {
+                Debug.LogError("[Addressables Downloader] No Addressables Data was found");
+                return;
+            }
+
+            var dataCatalogHash = addressableData.AddressableCRCList.Find(x => x.key.Contains(".hash"));
+            var dataCatalogJson = addressableData.AddressableCRCList.Find(x => x.key.Contains(".json"));
+            
             string path = Application.persistentDataPath + "/com.unity.addressables/";
             if (Directory.Exists(path))
             {
@@ -43,37 +122,80 @@ namespace Arbelos.BuildUtility.Runtime
                 //Refresh the directory before checking again.
                 dir.Refresh();
 
-                //first the hash files
-                FileInfo[] files = dir.GetFiles("catalog*.hash").OrderByDescending(p => p.LastWriteTime).ToArray();
-
-                if (files.Length > 1)
+                //first get all the hash files
+                FileInfo[] allHashFiles = dir.GetFiles("catalog*.hash").OrderByDescending(p => p.LastWriteTime).ToArray();
+                
+                //Get the current addressable data hash file
+                string hashFilePath = Path.Combine(dir.FullName, dataCatalogHash.key);
+                FileInfo currentHashFile = null;
+                if (File.Exists(hashFilePath))
                 {
-                    //skip the first file we want to keep it
-                    for (int i = 1; i < files.Length; i++)
+                    currentHashFile = new FileInfo(hashFilePath);
+                }
+                else
+                {
+                    Debug.Log($"[Addressables Downloader] Current Catalog Hash File not found: {hashFilePath}, new will be created.");
+                }
+                if (allHashFiles.Length > 1)
+                {
+                    //delete every other file except the current addressable data catalog hash file
+                    for (int i = 0; i < allHashFiles.Length; i++)
                     {
-                        FileInfo file = files[i];
-                        Debug.Log($"deleted: {file.Name}");
+                        if (currentHashFile != null && allHashFiles[i] == currentHashFile) continue;
+                        FileInfo file = allHashFiles[i];
+                        Debug.Log($"[Addressables Downloader] Catalog Hash File Deleted: {file.Name}");
                         file.Delete();
                     }
                 }
-
-                //now the json files
-                FileInfo[] jsonfiles = dir.GetFiles("catalog*.json").OrderByDescending(p => p.LastWriteTime).ToArray();
-
-                if (jsonfiles.Length > 1)
+                else
                 {
-                    //skip the first file we want to keep it
-                    for (int i = 1; i < jsonfiles.Length; i++)
+                    if(allHashFiles.Length == 1)
+                        Debug.Log("[AddressablesDownloader] No Previous Catalog Hash file found. Only one exists.");
+                    else
+                        Debug.LogError("[AddressablesDownloader] No Catalog Hash files found. Zero exists.");
+                }
+
+                //now get all the json files
+                FileInfo[] allJsonFiles = dir.GetFiles("catalog*.json").OrderByDescending(p => p.LastWriteTime).ToArray();
+                
+                //Get the current addressable data json file
+                string jsonFilePath = Path.Combine(dir.FullName, dataCatalogJson.key);
+                FileInfo currentJsonFile = null;
+                if (File.Exists(jsonFilePath))
+                {
+                    currentJsonFile = new FileInfo(jsonFilePath);
+                }
+                else
+                {
+                    Debug.Log($"[Addressables Downloader] Current Catalog Json File not found: {jsonFilePath}, new will be created.");
+                }
+
+                if (allJsonFiles.Length > 1)
+                {
+                    //delete every other file except the current addressable data catalog json file
+                    for (int i = 0; i < allJsonFiles.Length; i++)
                     {
-                        FileInfo file = jsonfiles[i];
-                        Debug.Log($"deleted: {file.Name}");
+                        if (currentJsonFile != null && allJsonFiles[i] == currentJsonFile) continue;
+                        FileInfo file = allJsonFiles[i];
+                        Debug.Log($"[Addressables Downloader] Catalog Json File Deleted: {file.Name}");
                         file.Delete();
                     }
                 }
+                else
+                {
+                    if(allJsonFiles.Length == 1)
+                        Debug.Log("[AddressablesDownloader] No Previous Catalog Json file found. Only one exists.");
+                    else
+                        Debug.LogError("[AddressablesDownloader] No Catalog Json files found. Zero exists.");
+                }
+            }
+            else
+            {
+                Debug.LogError("[Addressables Downloader] No catalog cache directory found!");
             }
         }
 
-        public async Task UpdateAndDownload()
+        public async Task<bool> UpdateAndDownload()
         {
             AsyncOperationHandle<List<IResourceLocator>> handle = Addressables.UpdateCatalogs(true, null, false);
 
@@ -82,6 +204,9 @@ namespace Arbelos.BuildUtility.Runtime
             List<IResourceLocator> updatedResourceLocators = handle.Result;
 
             Addressables.Release(handle);
+            
+            pendingKeys.Clear();
+            downloadedKeys.Clear();
 
             if (updatedResourceLocators != null)
             {
@@ -95,56 +220,42 @@ namespace Arbelos.BuildUtility.Runtime
                     allKeys.Append(updatedResourceLocators[i].Keys);
                 }
 
-                numAssetBundlesToDownload = allKeys.ToList().Count;
-                numDownloaded = 0;
+                pendingKeys = allKeys.ToList();
 
-                foreach (var key in allKeys)
+                if (downloadCoroutine != null && downloadCoroutine.Count >  0)
                 {
-                    numDownloaded++;
-
-                    //if (ui != null)
-                    //{
-                    //    ui.UpdateDownloadsText($"downloading ... {numDownloaded}/{numAssetBundlesToDownload}");
-                    //}
-
-
-                    var keyDownloadSizeKb = BytesToKiloBytes(await Addressables.GetDownloadSizeAsync(key).Task);
-                    if (keyDownloadSizeKb <= 0)
-                    {
-                        continue;
-                    }
-
-                    var keyDownloadOperation = Addressables.DownloadDependenciesAsync(key);
-                    while (!keyDownloadOperation.IsDone)
-                    {
-                        await Task.Yield();
-                        var status = keyDownloadOperation.GetDownloadStatus();
-                        percentageDownloaded = status.Percent * 100.0f;
-                        onPercentageDownloaded?.Invoke(percentageDownloaded);
-                        //if (ui != null)
-                        //{
-                        //    ui.UpdateProgressText(percent);
-                        //}
-                    }
-
-                    if (keyDownloadOperation.IsDone)
-                    {
-                        //Release the operation handle once a key has been downloaded
-                        Addressables.Release(keyDownloadOperation);
-                    }
+                    StopCoroutine(downloadCoroutine.First().Value);
+                    downloadCoroutine.First().Key.SetResult(false);
+                    downloadCoroutine.Clear();
+                    StopDownloadHandles();
                 }
-                Debug.Log("all downloads completed");
+
+                // Await a coroutine using TaskCompletionSource
+                var tcs = new TaskCompletionSource<bool>();
+                if (downloadCoroutine != null)
+                    downloadCoroutine.Add(tcs,
+                        StartCoroutine(DownloadKeysCoroutine(pendingKeys, success => { tcs.SetResult(success); })));
+
+                return await tcs.Task;
             }
+
+            return true;
         }
 
         public async void Initialize()
         {
+            wasConnected = Application.internetReachability != NetworkReachability.NotReachable;
+            StartCoroutine(CheckInternet());
+            
             //wait for caching to get ready
             while (!Caching.ready)
             {
                 await Task.Delay(1000);
             }
-
+            
+#if !UNITY_EDITOR
+            addressableData = Resources.Load<GameAddressableData>("GameAddressableData");
+#endif
             // Refresh Directories before doing anything
             RefreshCacheAndCatalogDirectories();
 
@@ -154,9 +265,10 @@ namespace Arbelos.BuildUtility.Runtime
 
             await handle.Task;
 
+            addressablesInitialized = true;
+
             Addressables.Release(handle);
 #if !UNITY_EDITOR
-            addressableData = Resources.Load<GameAddressableData>("GameAddressableData");
             if (addressableData != null && !String.IsNullOrEmpty(addressableData.profileName))
             {
                 var profileType = addressableData.profileName;
@@ -170,18 +282,22 @@ namespace Arbelos.BuildUtility.Runtime
 
                     Addressables.Release(catalogHandle);
 
+                    bool downloadDone = false;
                     if (possibleUpdates.Count > 0)
                     {
                         Debug.Log("Update available");
-                        await UpdateAndDownload();
+                        downloadDone = await UpdateAndDownload();
                     }
                     else
                     {
                         Debug.Log("No update available");
+                        downloadDone = true;
                     }
 
+                    downloadInitialized = true;
+
                     //validate files
-                    if (ValidateCurrentlyDownloadedFiles())
+                    if (downloadDone && ValidateCurrentlyDownloadedFiles())
                     {
                         isInitialized = true;
                         onInitialized?.Invoke();
@@ -244,7 +360,10 @@ namespace Arbelos.BuildUtility.Runtime
 
             //ClearPreviousCatalog();
             var existingLocators = Addressables.ResourceLocators.ToList();
-            //List<IResourceLocator> updatedResourceLocators = await Addressables.UpdateCatalogs(true);
+
+            pendingKeys.Clear();
+            downloadedKeys.Clear();
+            
 
             if (existingLocators != null)
             {
@@ -254,49 +373,59 @@ namespace Arbelos.BuildUtility.Runtime
                 {
                     allKeys.Append(existingLocators[i].Keys);
                 }
+                
+                pendingKeys = allKeys.ToList();
 
-                numAssetBundlesToDownload = allKeys.ToList().Count;
-                numDownloaded = 0;
-
-                foreach (var key in allKeys)
+                if (downloadCoroutine != null && downloadCoroutine.Count >  0)
                 {
-                    numDownloaded++;
-
-                    //if (ui != null)
-                    //{
-                    //    ui.UpdateDownloadsText($"downloading ... {numDownloaded}/{numAssetBundlesToDownload}");
-                    //}
-
-
-                    var keyDownloadSizeKb = BytesToKiloBytes(await Addressables.GetDownloadSizeAsync(key).Task);
-                    if (keyDownloadSizeKb <= 0)
-                    {
-                        continue;
-                    }
-
-                    var keyDownloadOperation = Addressables.DownloadDependenciesAsync(key);
-                    while (!keyDownloadOperation.IsDone)
-                    {
-                        await Task.Yield();
-                        var status = keyDownloadOperation.GetDownloadStatus();
-                        percentageDownloaded = status.Percent * 100.0f;
-
-                        //if (ui != null)
-                        //{
-                        //    ui.UpdateProgressText(percent);
-                        //}
-                    }
-
-                    if (keyDownloadOperation.IsDone)
-                    {
-                        //Release the operation handle once a key has been downloaded
-                        Addressables.Release(keyDownloadOperation);
-                    }
+                    StopCoroutine(downloadCoroutine.First().Value);
+                    downloadCoroutine.First().Key.SetResult(false);
+                    downloadCoroutine.Clear();
+                    StopDownloadHandles();
                 }
-                Debug.Log("all downloads completed");
+
+                // Await a coroutine using TaskCompletionSource
+                var tcs = new TaskCompletionSource<bool>();
+                if (downloadCoroutine != null)
+                    downloadCoroutine.Add(tcs,
+                        StartCoroutine(DownloadKeysCoroutine(pendingKeys, success => { tcs.SetResult(success); })));
+
+                var downloadDone = await tcs.Task;
+
+                //validate files
+                if (downloadDone && ValidateCurrentlyDownloadedFiles())
+                {
+                    isInitialized = true;
+                    onInitialized?.Invoke();
+                }
             }
+        }
+
+        private async void ResumePendingDownload()
+        {
+            Debug.Log($"[Addressables Downloader] Resuming Download...");
+            
+            //Remove any stragglers already existing in downloaded keys.
+            pendingKeys = pendingKeys.Distinct().Except(downloadedKeys).ToList();
+
+            if (downloadCoroutine != null && downloadCoroutine.Count >  0)
+            {
+                StopCoroutine(downloadCoroutine.First().Value);
+                downloadCoroutine.First().Key.SetResult(false);
+                downloadCoroutine.Clear();
+                StopDownloadHandles();
+            }
+
+            // Await a coroutine using TaskCompletionSource
+            var tcs = new TaskCompletionSource<bool>();
+            if (downloadCoroutine != null)
+                downloadCoroutine.Add(tcs,
+                    StartCoroutine(DownloadKeysCoroutine(pendingKeys, success => { tcs.SetResult(success); })));
+
+            var downloadDone = await tcs.Task;
+
             //validate files
-            if (ValidateCurrentlyDownloadedFiles())
+            if (downloadDone && ValidateCurrentlyDownloadedFiles())
             {
                 isInitialized = true;
                 onInitialized?.Invoke();
@@ -310,7 +439,124 @@ namespace Arbelos.BuildUtility.Runtime
             RedownloadGameFiles();
         }
 
+        public IEnumerator DownloadKeysCoroutine(List<object> _keys, Action<bool> onComplete)
+        {
+            hasError = false;
+            bool result = false;
 
+            if (hasError || wasPaused || !wasConnected)
+            {
+                Debug.Log("[Addressables Downloader] Exiting Download...Either has error, paused or not connected.");
+                onComplete?.Invoke(false);
+                downloadCoroutine.Clear();
+                yield break;
+            }
+
+            numAssetBundlesToDownload = pendingKeys.Count + downloadedKeys.Count;
+            numDownloaded = downloadedKeys.Count;
+
+            foreach (var key in _keys.ToArray())
+            {
+                if (hasError || wasPaused || !wasConnected)
+                {
+                    Debug.Log("[Addressables Downloader] Exiting Download...Either cancelled, error, paused or not connected.");
+                    onComplete?.Invoke(false);
+                    downloadCoroutine.Clear();
+                    yield break;
+                }
+
+                downloadSizeHandle = Addressables.GetDownloadSizeAsync(key);
+                
+                yield return downloadSizeHandle;
+                
+                var keyDownloadSizeKb = BytesToKiloBytes(downloadSizeHandle.Result);
+                if (keyDownloadSizeKb <= 0)
+                {
+                    if (!pendingKeys.Remove(key))
+                        Debug.Log($"[Addressables Downloader] {key} Key was not removed from Pending Keys");
+
+                    downloadedKeys.Add(key);
+
+                    if (downloadSizeHandle.IsValid())
+                    {
+                        Addressables.Release(downloadSizeHandle);
+                    }
+                    
+                    numDownloaded++;
+                    percentageDownloaded = ((float)numDownloaded / numAssetBundlesToDownload) * 100f;
+
+                    Debug.Log($"[Addressables Downloader] {key} key downloaded.");
+                    Debug.Log($"[Addressables Downloader] Downloading Assets - {percentageDownloaded} % complete - {numDownloaded}/{numAssetBundlesToDownload} downloaded.");
+                    Debug.Log($"[Addressables Downloader] [Download Iteration] Pending #Keys: {pendingKeys.Count} | Downloaded #Keys: {downloadedKeys.Count}");
+
+                    onPercentageDownloaded?.Invoke(percentageDownloaded);
+                    
+                    continue;
+                }
+                
+                if (downloadSizeHandle.IsValid())
+                {
+                    Addressables.Release(downloadSizeHandle);
+                }
+
+                clearHandle = Addressables.ClearDependencyCacheAsync(key, false);
+                yield return clearHandle;
+
+                if (clearHandle.Status == AsyncOperationStatus.Succeeded)
+                {
+                    Debug.Log($"[Addressables Downloader] Cleared cache for key: {key}");
+                }
+                else
+                {
+                    Debug.LogWarning($"[Addressables Downloader] Failed to clear cache for key: {key}. Will still attempt download.");
+                }
+
+                if(clearHandle.IsValid())
+                    Addressables.Release(clearHandle);
+
+                downloadHandle = Addressables.DownloadDependenciesAsync(key);
+                yield return downloadHandle;
+
+                if (downloadHandle.Status == AsyncOperationStatus.Succeeded)
+                {
+                    if (!pendingKeys.Remove(key))
+                        Debug.Log($"[Addressables Downloader] {key} Key was not removed from Pending Keys");
+
+                    downloadedKeys.Add(key);
+                }
+                else
+                {
+                    hasError = true;
+                    Debug.LogError($"Download failed for key: {key}");
+                    if(downloadHandle.IsValid())
+                        Addressables.Release(downloadHandle);
+                    continue;
+                }
+
+                if(downloadHandle.IsValid())
+                    Addressables.Release(downloadHandle);
+                
+                numDownloaded++;
+                percentageDownloaded = ((float)numDownloaded / numAssetBundlesToDownload) * 100f;
+
+                Debug.Log($"[Addressables Downloader] {key} key downloaded.");
+                Debug.Log($"[Addressables Downloader] Downloading Assets - {percentageDownloaded} % complete - {numDownloaded}/{numAssetBundlesToDownload} downloaded.");
+                Debug.Log($"[Addressables Downloader] [Download Iteration] Pending #Keys: {pendingKeys.Count} | Downloaded #Keys: {downloadedKeys.Count}");
+
+                onPercentageDownloaded?.Invoke(percentageDownloaded);
+            }
+
+            if (!hasError && !wasPaused && wasConnected)
+            {
+                Debug.Log("All downloads completed successfully.");
+
+                result = true;
+            }
+            
+            onComplete?.Invoke(result);
+            downloadCoroutine.Clear();
+        }
+        
         private void RefreshCacheAndCatalogDirectories()
         {
             //Refresh the catalog directory.
@@ -330,6 +576,25 @@ namespace Arbelos.BuildUtility.Runtime
             {
                 DirectoryInfo dir = new DirectoryInfo(cachePath);
                 dir.Refresh();
+            }
+        }
+
+        private void StopDownloadHandles()
+        {
+            if (downloadHandle.IsValid())
+            {
+                Addressables.Release(downloadHandle);
+                Debug.Log("[Addressables Downloader] Download Handle Released");
+            }
+            if (clearHandle.IsValid())
+            {
+                Addressables.Release(clearHandle);
+                Debug.Log("[Addressables Downloader] Clear Handle Released");
+            }
+            if (downloadSizeHandle.IsValid())
+            {
+                Addressables.Release(downloadSizeHandle);
+                Debug.Log("[Addressables Downloader] Download Size Handle Released");
             }
         }
 
@@ -369,8 +634,7 @@ namespace Arbelos.BuildUtility.Runtime
             }
             return _assetsFileIds;
         }
-
-
+        
         private bool ValidateCatalogFiles(List<AddressableCRCEntry> _data)
         {
             ClearPreviousCatalog();
@@ -401,6 +665,7 @@ namespace Arbelos.BuildUtility.Runtime
                             }
                             else
                             {
+                                Debug.LogError($"[Addressables Downloader] Catalog File: {data.key} is invalid.");
                                 return false;
                             }
                         }
@@ -412,6 +677,7 @@ namespace Arbelos.BuildUtility.Runtime
                             }
                             else
                             {
+                                Debug.LogError($"[Addressables Downloader] Catalog File: {data.key} is invalid.");
                                 return false;
                             }
                         }
@@ -419,8 +685,13 @@ namespace Arbelos.BuildUtility.Runtime
                 }
                 else
                 {
+                    Debug.LogError("[Addressables Downloader] No catalog JSON and HASH Files Found");
                     return false;
                 }
+            }
+            else
+            {
+                Debug.LogError("[Addressables Downloader] No catalog cache directory found!");
             }
             return isValid;
         }
@@ -446,6 +717,7 @@ namespace Arbelos.BuildUtility.Runtime
                                 var files = subDirs.First().GetFiles();
                                 if (files.Length < 2)
                                 {
+                                    Debug.LogError($"[Addressables Downloader] No minimum required amount of files (2) found under the sub direc. folder of key: {data.key}");
                                     return false;
                                 }
                                 else
@@ -461,6 +733,7 @@ namespace Arbelos.BuildUtility.Runtime
                                             }
                                             else
                                             {
+                                                Debug.LogError($"[Addressables Downloader] CRC Check failed for {data.key} key. File is invalid.");
                                                 return false;
                                             }
                                         }
@@ -472,6 +745,7 @@ namespace Arbelos.BuildUtility.Runtime
                                 var files = folder.GetFiles();
                                 if (files.Length < 2)
                                 {
+                                    Debug.LogError($"[Addressables Downloader] No minimum required amount of files (2) found under the folder of key: {data.key}");
                                     return false;
                                 }
                                 else
@@ -487,6 +761,7 @@ namespace Arbelos.BuildUtility.Runtime
                                             }
                                             else
                                             {
+                                                Debug.LogError($"[Addressables Downloader] CRC Check failed for {data.key} key. File is invalid.");
                                                 return false;
                                             }
                                         }
@@ -499,6 +774,7 @@ namespace Arbelos.BuildUtility.Runtime
             }
             else
             {
+                Debug.LogError("[Addressables Downloader] No game file asset folders found!");
                 return false;
             }
 
