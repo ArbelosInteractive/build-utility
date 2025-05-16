@@ -143,6 +143,10 @@ namespace Arbelos.BuildUtility.Runtime
                     {
                         if (currentHashFile != null && allHashFiles[i] == currentHashFile) continue;
                         FileInfo file = allHashFiles[i];
+                        
+                        //Don't delete the one we need
+                        if (file.Name.Equals(dataCatalogHash.key)) continue;
+                        
                         Debug.Log($"[Addressables Downloader] Catalog Hash File Deleted: {file.Name}");
                         file.Delete();
                     }
@@ -176,7 +180,12 @@ namespace Arbelos.BuildUtility.Runtime
                     for (int i = 0; i < allJsonFiles.Length; i++)
                     {
                         if (currentJsonFile != null && allJsonFiles[i] == currentJsonFile) continue;
+                        
                         FileInfo file = allJsonFiles[i];
+                        
+                        //Don't delete the one we need
+                        if (file.Name.Equals(dataCatalogJson.key)) continue;
+                        
                         Debug.Log($"[Addressables Downloader] Catalog Json File Deleted: {file.Name}");
                         file.Delete();
                     }

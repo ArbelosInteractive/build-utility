@@ -146,3 +146,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - ## [1.0.33] - 2025-05-14
 ### Fixed
 - Addressables Downloader - Updated Addressables - Clear Previous Catalog Function to use current addressables data to get latest catalog file.
+
+- ## [1.0.34] - 2025-05-16
+### Fixed
+- Addressables Downloader - Clear Previous Catalogs - Prevent current catalog files from being deleted.
