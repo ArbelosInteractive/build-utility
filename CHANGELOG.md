@@ -150,3 +150,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - ## [1.0.34] - 2025-05-16
 ### Fixed
 - Addressables Downloader - Clear Previous Catalogs - Prevent current catalog files from being deleted.
+
+- ## [1.0.35] - 2025-05-16
+### Fixed
+- Addressables Downloader - Re-download invalid game files.

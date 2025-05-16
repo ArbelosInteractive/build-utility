@@ -352,10 +352,11 @@ namespace Arbelos.BuildUtility.Runtime
 
             if (!ValidateGameFiles(addressableData.AddressableCRCList, assetsFileIds, cachePath))
             {
-                PurgeAddressableFiles();
-                onValidationFail?.Invoke();
-                StartReDownload();
-                Debug.Log($"<color=orange>INVALID GAME FILES DETECTED!!</color>");
+                //PurgeAddressableFiles();
+                //onValidationFail?.Invoke();
+                //StartReDownload();
+                Debug.Log($"<color=orange>INVALID GAME FILES DETECTED, Redownloading invalid files!!</color>");
+                ResumePendingDownload();
                 return false;
             }
 #endif
@@ -770,8 +771,20 @@ namespace Arbelos.BuildUtility.Runtime
                                             }
                                             else
                                             {
-                                                Debug.LogError($"[Addressables Downloader] CRC Check failed for {data.key} key. File is invalid.");
-                                                return false;
+                                                var failedDownloadedKey =
+                                                    downloadedKeys.Where(x => data.key.Contains(x.ToString())).ToList();
+                                                if (failedDownloadedKey.Count == 1)
+                                                {
+                                                    downloadedKeys.Remove(failedDownloadedKey[0]);
+                                                    pendingKeys.Add(failedDownloadedKey[0]);
+                                                    Debug.LogError($"[Addressables Downloader] CRC Check failed for {data.key} key. File is invalid. Adding key back to pending and will download again.");
+                                                    isValid = false;
+                                                }
+                                                else
+                                                {
+                                                    Debug.LogError($"[Addressables Downloader] CRC Check failed for {data.key} key. File is invalid.");
+                                                    return false;
+                                                }
                                             }
                                         }
                                     }
