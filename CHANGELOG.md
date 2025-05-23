@@ -158,3 +158,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - ## [1.0.36] - 2025-05-23
 ### Fixed
 - Addressables Downloader - Fix re-download invalid files and skip download size check.
+
+- ## [1.0.37] - 2025-05-23
+### Fixed
+- Addressables Downloader - Skip size check only for built in shaders - redo them again.

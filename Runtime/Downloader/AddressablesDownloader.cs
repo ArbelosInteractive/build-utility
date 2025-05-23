@@ -475,39 +475,43 @@ namespace Arbelos.BuildUtility.Runtime
                     yield break;
                 }
 
-                // downloadSizeHandle = Addressables.GetDownloadSizeAsync(key);
-                //
-                // yield return downloadSizeHandle;
-                //
-                // var keyDownloadSizeKb = BytesToKiloBytes(downloadSizeHandle.Result);
-                // if (keyDownloadSizeKb <= 0)
-                // {
-                //     if (!pendingKeys.Remove(key))
-                //         Debug.Log($"[Addressables Downloader] {key} Key was not removed from Pending Keys");
-                //
-                //     downloadedKeys.Add(key);
-                //
-                //     if (downloadSizeHandle.IsValid())
-                //     {
-                //         Addressables.Release(downloadSizeHandle);
-                //     }
-                //     
-                //     numDownloaded++;
-                //     percentageDownloaded = ((float)numDownloaded / numAssetBundlesToDownload) * 100f;
-                //
-                //     Debug.Log($"[Addressables Downloader] {key} key downloaded.");
-                //     Debug.Log($"[Addressables Downloader] Downloading Assets - {percentageDownloaded} % complete - {numDownloaded}/{numAssetBundlesToDownload} downloaded.");
-                //     Debug.Log($"[Addressables Downloader] [Download Iteration] Pending #Keys: {pendingKeys.Count} | Downloaded #Keys: {downloadedKeys.Count}");
-                //
-                //     onPercentageDownloaded?.Invoke(percentageDownloaded);
-                //     
-                //     continue;
-                // }
-                //
-                // if (downloadSizeHandle.IsValid())
-                // {
-                //     Addressables.Release(downloadSizeHandle);
-                // }
+                //Skip size check for shaders
+                if (!key.ToString().Contains("unitybuiltinshaders"))
+                {
+                    downloadSizeHandle = Addressables.GetDownloadSizeAsync(key);
+                
+                    yield return downloadSizeHandle;
+                
+                    var keyDownloadSizeKb = BytesToKiloBytes(downloadSizeHandle.Result);
+                    if (keyDownloadSizeKb <= 0)
+                    {
+                        if (!pendingKeys.Remove(key))
+                            Debug.Log($"[Addressables Downloader] {key} Key was not removed from Pending Keys");
+                
+                        downloadedKeys.Add(key);
+                
+                        if (downloadSizeHandle.IsValid())
+                        {
+                            Addressables.Release(downloadSizeHandle);
+                        }
+                    
+                        numDownloaded++;
+                        percentageDownloaded = ((float)numDownloaded / numAssetBundlesToDownload) * 100f;
+                
+                        Debug.Log($"[Addressables Downloader] {key} key downloaded.");
+                        Debug.Log($"[Addressables Downloader] Downloading Assets - {percentageDownloaded} % complete - {numDownloaded}/{numAssetBundlesToDownload} downloaded.");
+                        Debug.Log($"[Addressables Downloader] [Download Iteration] Pending #Keys: {pendingKeys.Count} | Downloaded #Keys: {downloadedKeys.Count}");
+                
+                        onPercentageDownloaded?.Invoke(percentageDownloaded);
+                    
+                        continue;
+                    }
+                }
+                
+                if (downloadSizeHandle.IsValid())
+                {
+                    Addressables.Release(downloadSizeHandle);
+                }
 
                 clearHandle = Addressables.ClearDependencyCacheAsync(key, false);
                 yield return clearHandle;
