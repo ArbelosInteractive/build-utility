@@ -154,3 +154,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - ## [1.0.35] - 2025-05-16
 ### Fixed
 - Addressables Downloader - Re-download invalid game files.
+
+- ## [1.0.36] - 2025-05-23
+### Fixed
+- Addressables Downloader - Fix re-download invalid files and skip download size check.
