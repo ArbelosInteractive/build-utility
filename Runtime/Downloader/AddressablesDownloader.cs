@@ -352,11 +352,10 @@ namespace Arbelos.BuildUtility.Runtime
 
             if (!ValidateGameFiles(addressableData.AddressableCRCList, assetsFileIds, cachePath))
             {
-                //PurgeAddressableFiles();
-                //onValidationFail?.Invoke();
-                //StartReDownload();
-                Debug.Log($"<color=orange>INVALID GAME FILES DETECTED, Redownloading invalid files!!</color>");
-                ResumePendingDownload();
+                PurgeAddressableFiles();
+                onValidationFail?.Invoke();
+                StartReDownload();
+                Debug.Log($"<color=orange>INVALID GAME FILES DETECTED!!</color>");
                 return false;
             }
 #endif
@@ -747,21 +746,8 @@ namespace Arbelos.BuildUtility.Runtime
                                             }
                                             else
                                             {
-                                                var failedDownloadedKey =
-                                                    downloadedKeys.Where(x => data.key.Contains(x.ToString())).ToList();
-                                                if (failedDownloadedKey.Count == 1)
-                                                {
-                                                    downloadedKeys.Remove(failedDownloadedKey[0]);
-                                                    pendingKeys.Add(failedDownloadedKey[0]);
-                                                    Debug.LogError($"[Addressables Downloader] CRC Check failed for {data.key} key. File is invalid. Adding key back to pending and will download again.");
-                                                    return false;
-                                                }
-                                                else
-                                                {
-                                                    Debug.LogError(
-                                                        $"[Addressables Downloader] CRC Check failed for {data.key} key. File is invalid.");
-                                                    return false;
-                                                }
+                                                Debug.LogError($"[Addressables Downloader] CRC Check failed for {data.key} key. File is invalid.");
+                                                return false;
                                             }
                                         }
                                     }
@@ -788,20 +774,8 @@ namespace Arbelos.BuildUtility.Runtime
                                             }
                                             else
                                             {
-                                                var failedDownloadedKey =
-                                                    downloadedKeys.Where(x => data.key.Contains(x.ToString())).ToList();
-                                                if (failedDownloadedKey.Count == 1)
-                                                {
-                                                    downloadedKeys.Remove(failedDownloadedKey[0]);
-                                                    pendingKeys.Add(failedDownloadedKey[0]);
-                                                    Debug.LogError($"[Addressables Downloader] CRC Check failed for {data.key} key. File is invalid. Adding key back to pending and will download again.");
-                                                    return false;
-                                                }
-                                                else
-                                                {
-                                                    Debug.LogError($"[Addressables Downloader] CRC Check failed for {data.key} key. File is invalid.");
-                                                    return false;
-                                                }
+                                                Debug.LogError($"[Addressables Downloader] CRC Check failed for {data.key} key. File is invalid.");
+                                                return false;
                                             }
                                         }
                                     }
