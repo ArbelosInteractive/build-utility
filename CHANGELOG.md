@@ -166,3 +166,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - ## [1.0.38] - 2025-05-23
 ### Fixed
 - Addressables Downloader - Revert redownload invalid key logic
+
+- ## [1.0.39] - 2025-05-29
+### Fixed
+- Addressables Downloader - Change back to async function 

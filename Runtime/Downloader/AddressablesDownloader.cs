@@ -39,10 +39,12 @@ namespace Arbelos.BuildUtility.Runtime
         //Used to track that initial addressables initialization code has been run.
         private bool addressablesInitialized;
         private bool downloadInitialized;
-        private Dictionary<TaskCompletionSource<bool>, Coroutine> downloadCoroutine = new();
         private AsyncOperationHandle downloadHandle;
         private AsyncOperationHandle clearHandle;
         private AsyncOperationHandle<long> downloadSizeHandle;
+
+        private bool assetDownloadActive = false;
+        private CancellationTokenSource downloadCancellationTokenSource;
         
         #endregion
         
@@ -57,8 +59,8 @@ namespace Arbelos.BuildUtility.Runtime
                 if (pauseStatus)
                 {
                     Debug.Log("App paused (device may be sleeping or switching apps)");
-                    StopAllCoroutines();
-                    StopDownloadHandles();
+                    CancelDownload();
+
                 }
                 else
                 {
@@ -90,8 +92,7 @@ namespace Arbelos.BuildUtility.Runtime
                     else
                     {
                         Debug.Log("Internet disconnected");
-                        StopAllCoroutines();
-                        StopDownloadHandles();
+                        CancelDownload();
                     }
                 }
                 
@@ -230,20 +231,12 @@ namespace Arbelos.BuildUtility.Runtime
                 }
 
                 pendingKeys = allKeys.ToList();
-
-                if (downloadCoroutine != null && downloadCoroutine.Count >  0)
-                {
-                    StopCoroutine(downloadCoroutine.First().Value);
-                    downloadCoroutine.First().Key.SetResult(false);
-                    downloadCoroutine.Clear();
-                    StopDownloadHandles();
-                }
+                
+                CancelDownload();
 
                 // Await a coroutine using TaskCompletionSource
                 var tcs = new TaskCompletionSource<bool>();
-                if (downloadCoroutine != null)
-                    downloadCoroutine.Add(tcs,
-                        StartCoroutine(DownloadKeysCoroutine(pendingKeys, success => { tcs.SetResult(success); })));
+                DownloadKeysAsync(pendingKeys, success => { tcs.SetResult(success); });
 
                 return await tcs.Task;
             }
@@ -348,7 +341,7 @@ namespace Arbelos.BuildUtility.Runtime
             string cachePath = cachePaths[0];
 
             //File IDS will be used to search for folders in cachePath assets that are under the same folder names as the assetFileIDs
-            List<string> assetsFileIds = FetchGameAssetsFileIds(addressableData.AddressableCRCList);
+           List< string> assetsFileIds = FetchGameAssetsFileIds(addressableData.AddressableCRCList);
 
             if (!ValidateGameFiles(addressableData.AddressableCRCList, assetsFileIds, cachePath))
             {
@@ -384,20 +377,12 @@ namespace Arbelos.BuildUtility.Runtime
                 }
                 
                 pendingKeys = allKeys.ToList();
-
-                if (downloadCoroutine != null && downloadCoroutine.Count >  0)
-                {
-                    StopCoroutine(downloadCoroutine.First().Value);
-                    downloadCoroutine.First().Key.SetResult(false);
-                    downloadCoroutine.Clear();
-                    StopDownloadHandles();
-                }
+                
+                CancelDownload();
 
                 // Await a coroutine using TaskCompletionSource
                 var tcs = new TaskCompletionSource<bool>();
-                if (downloadCoroutine != null)
-                    downloadCoroutine.Add(tcs,
-                        StartCoroutine(DownloadKeysCoroutine(pendingKeys, success => { tcs.SetResult(success); })));
+                DownloadKeysAsync(pendingKeys, success => { tcs.SetResult(success); });
 
                 var downloadDone = await tcs.Task;
 
@@ -416,20 +401,12 @@ namespace Arbelos.BuildUtility.Runtime
             
             //Remove any stragglers already existing in downloaded keys.
             pendingKeys = pendingKeys.Distinct().Except(downloadedKeys).ToList();
-
-            if (downloadCoroutine != null && downloadCoroutine.Count >  0)
-            {
-                StopCoroutine(downloadCoroutine.First().Value);
-                downloadCoroutine.First().Key.SetResult(false);
-                downloadCoroutine.Clear();
-                StopDownloadHandles();
-            }
+            
+            CancelDownload();
 
             // Await a coroutine using TaskCompletionSource
             var tcs = new TaskCompletionSource<bool>();
-            if (downloadCoroutine != null)
-                downloadCoroutine.Add(tcs,
-                    StartCoroutine(DownloadKeysCoroutine(pendingKeys, success => { tcs.SetResult(success); })));
+            DownloadKeysAsync(pendingKeys, success => { tcs.SetResult(success); });
 
             var downloadDone = await tcs.Task;
 
@@ -447,127 +424,132 @@ namespace Arbelos.BuildUtility.Runtime
             //Initialize();
             RedownloadGameFiles();
         }
-
-        public IEnumerator DownloadKeysCoroutine(List<object> _keys, Action<bool> onComplete)
+        
+        // Call this to cancel the download
+        public void CancelDownload()
         {
+            if (downloadCancellationTokenSource != null && !downloadCancellationTokenSource.IsCancellationRequested)
+            {
+                downloadCancellationTokenSource.Cancel();
+                Debug.Log("[Addressables Downloader] Cancellation requested.");
+            }
+            StopDownloadHandles();
+        }
+
+        public async Task DownloadKeysAsync(List<object> _keys, Action<bool> onComplete)
+        {
+            assetDownloadActive = true;
+            downloadCancellationTokenSource = new CancellationTokenSource();
+            CancellationToken token = downloadCancellationTokenSource.Token;
+
             hasError = false;
             bool result = false;
 
             if (hasError || wasPaused || !wasConnected)
             {
-                Debug.Log("[Addressables Downloader] Exiting Download...Either has error, paused or not connected.");
+                Debug.Log("[Addressables Downloader] Exiting Download... Either has error, paused, or not connected.");
+                assetDownloadActive = false;
                 onComplete?.Invoke(false);
-                downloadCoroutine.Clear();
-                yield break;
+                return;
             }
 
             numAssetBundlesToDownload = pendingKeys.Count + downloadedKeys.Count;
             numDownloaded = downloadedKeys.Count;
 
-            foreach (var key in _keys.ToArray())
+            try
             {
-                if (hasError || wasPaused || !wasConnected)
+                foreach (var key in _keys.ToArray())
                 {
-                    Debug.Log("[Addressables Downloader] Exiting Download...Either cancelled, error, paused or not connected.");
-                    onComplete?.Invoke(false);
-                    downloadCoroutine.Clear();
-                    yield break;
-                }
+                    token.ThrowIfCancellationRequested();
 
-                //Skip size check for shaders
-                if (!key.ToString().Contains("unitybuiltinshaders"))
-                {
-                    downloadSizeHandle = Addressables.GetDownloadSizeAsync(key);
-                
-                    yield return downloadSizeHandle;
-                
-                    var keyDownloadSizeKb = BytesToKiloBytes(downloadSizeHandle.Result);
-                    if (keyDownloadSizeKb <= 0)
+                    if (hasError || wasPaused || !wasConnected)
+                    {
+                        Debug.Log("[Addressables Downloader] Exiting Download... Either cancelled, error, paused or not connected.");
+                        assetDownloadActive = false;
+                        onComplete?.Invoke(false);
+                        return;
+                    }
+
+                    AsyncOperationHandle<long> downloadSizeHandle = default;
+                    if (!key.ToString().Contains("unitybuiltinshaders"))
+                    {
+                        downloadSizeHandle = Addressables.GetDownloadSizeAsync(key);
+                        await downloadSizeHandle.Task;
+
+                        var keyDownloadSizeKb = BytesToKiloBytes(downloadSizeHandle.Result);
+                        if (keyDownloadSizeKb <= 0)
+                        {
+                            if (!pendingKeys.Remove(key))
+                                Debug.Log($"[Addressables Downloader] {key} Key was not removed from Pending Keys");
+
+                            downloadedKeys.Add(key);
+                            Addressables.Release(downloadSizeHandle);
+
+                            numDownloaded++;
+                            percentageDownloaded = ((float)numDownloaded / numAssetBundlesToDownload) * 100f;
+                            onPercentageDownloaded?.Invoke(percentageDownloaded);
+                            continue;
+                        }
+
+                        Addressables.Release(downloadSizeHandle);
+                    }
+
+                    AsyncOperationHandle clearHandle = Addressables.ClearDependencyCacheAsync(key, false);
+                    await clearHandle.Task;
+                    if (clearHandle.Status == AsyncOperationStatus.Succeeded)
+                    {
+                        Debug.Log($"[Addressables Downloader] Cleared cache for key: {key}");
+                    }
+                    else
+                    {
+                        Debug.LogWarning($"[Addressables Downloader] Failed to clear cache for key: {key}. Will still attempt download.");
+                    }
+                    Addressables.Release(clearHandle);
+
+                    AsyncOperationHandle downloadHandle = Addressables.DownloadDependenciesAsync(key);
+                    await downloadHandle.Task;
+
+                    if (downloadHandle.Status == AsyncOperationStatus.Succeeded)
                     {
                         if (!pendingKeys.Remove(key))
                             Debug.Log($"[Addressables Downloader] {key} Key was not removed from Pending Keys");
-                
                         downloadedKeys.Add(key);
-                
-                        if (downloadSizeHandle.IsValid())
-                        {
-                            Addressables.Release(downloadSizeHandle);
-                        }
-                    
-                        numDownloaded++;
-                        percentageDownloaded = ((float)numDownloaded / numAssetBundlesToDownload) * 100f;
-                
-                        Debug.Log($"[Addressables Downloader] {key} key downloaded.");
-                        Debug.Log($"[Addressables Downloader] Downloading Assets - {percentageDownloaded} % complete - {numDownloaded}/{numAssetBundlesToDownload} downloaded.");
-                        Debug.Log($"[Addressables Downloader] [Download Iteration] Pending #Keys: {pendingKeys.Count} | Downloaded #Keys: {downloadedKeys.Count}");
-                
-                        onPercentageDownloaded?.Invoke(percentageDownloaded);
-                    
+                    }
+                    else
+                    {
+                        hasError = true;
+                        Debug.LogError($"Download failed for key: {key}");
+                        Addressables.Release(downloadHandle);
                         continue;
                     }
-                }
-                
-                if (downloadSizeHandle.IsValid())
-                {
-                    Addressables.Release(downloadSizeHandle);
-                }
 
-                clearHandle = Addressables.ClearDependencyCacheAsync(key, false);
-                yield return clearHandle;
-
-                if (clearHandle.Status == AsyncOperationStatus.Succeeded)
-                {
-                    Debug.Log($"[Addressables Downloader] Cleared cache for key: {key}");
-                }
-                else
-                {
-                    Debug.LogWarning($"[Addressables Downloader] Failed to clear cache for key: {key}. Will still attempt download.");
-                }
-
-                if(clearHandle.IsValid())
-                    Addressables.Release(clearHandle);
-
-                downloadHandle = Addressables.DownloadDependenciesAsync(key);
-                yield return downloadHandle;
-
-                if (downloadHandle.Status == AsyncOperationStatus.Succeeded)
-                {
-                    if (!pendingKeys.Remove(key))
-                        Debug.Log($"[Addressables Downloader] {key} Key was not removed from Pending Keys");
-
-                    downloadedKeys.Add(key);
-                }
-                else
-                {
-                    hasError = true;
-                    Debug.LogError($"Download failed for key: {key}");
-                    if(downloadHandle.IsValid())
-                        Addressables.Release(downloadHandle);
-                    continue;
-                }
-
-                if(downloadHandle.IsValid())
                     Addressables.Release(downloadHandle);
-                
-                numDownloaded++;
-                percentageDownloaded = ((float)numDownloaded / numAssetBundlesToDownload) * 100f;
 
-                Debug.Log($"[Addressables Downloader] {key} key downloaded.");
-                Debug.Log($"[Addressables Downloader] Downloading Assets - {percentageDownloaded} % complete - {numDownloaded}/{numAssetBundlesToDownload} downloaded.");
-                Debug.Log($"[Addressables Downloader] [Download Iteration] Pending #Keys: {pendingKeys.Count} | Downloaded #Keys: {downloadedKeys.Count}");
+                    numDownloaded++;
+                    percentageDownloaded = ((float)numDownloaded / numAssetBundlesToDownload) * 100f;
+                    onPercentageDownloaded?.Invoke(percentageDownloaded);
+                }
 
-                onPercentageDownloaded?.Invoke(percentageDownloaded);
+                if (!hasError && !wasPaused && wasConnected)
+                {
+                    Debug.Log("All downloads completed successfully.");
+                    result = true;
+                }
             }
-
-            if (!hasError && !wasPaused && wasConnected)
+            catch (OperationCanceledException)
             {
-                Debug.Log("All downloads completed successfully.");
-
-                result = true;
+                Debug.LogWarning("[Addressables Downloader] Download was cancelled.");
+                hasError = true;
+                assetDownloadActive = false;
+                result = false;
             }
-            
-            onComplete?.Invoke(result);
-            downloadCoroutine.Clear();
+            finally
+            {
+                assetDownloadActive = false;
+                onComplete?.Invoke(result);
+                downloadCancellationTokenSource.Dispose();
+                downloadCancellationTokenSource = null;
+            }
         }
         
         private void RefreshCacheAndCatalogDirectories()
