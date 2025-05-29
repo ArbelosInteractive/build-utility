@@ -20,6 +20,9 @@ namespace Arbelos.BuildUtility.Runtime
         #region public variables
 
         [HideInInspector] public bool isInitialized;
+
+        [Tooltip("List of Asset names to skip the download for. It is case sensitive.")]
+        public List<string> assetsToSkip = new();
         public int numDownloaded;
         public int numAssetBundlesToDownload;
         public float percentageDownloaded;
@@ -468,6 +471,22 @@ namespace Arbelos.BuildUtility.Runtime
                         assetDownloadActive = false;
                         onComplete?.Invoke(false);
                         return;
+                    }
+                    
+                    //Skip download if selected to be skipped.
+                    if (assetsToSkip.Exists(x => x.Contains(key.ToString())))
+                    {
+                        Debug.Log($"[Addressables Downloader] {key} Key was skipped as requested.");
+                        
+                        if (!pendingKeys.Remove(key))
+                            Debug.Log($"[Addressables Downloader] {key} Key was not removed from Pending Keys");
+
+                        downloadedKeys.Add(key);
+
+                        numDownloaded++;
+                        percentageDownloaded = ((float)numDownloaded / numAssetBundlesToDownload) * 100f;
+                        onPercentageDownloaded?.Invoke(percentageDownloaded);
+                        continue;
                     }
 
                     AsyncOperationHandle<long> downloadSizeHandle = default;
