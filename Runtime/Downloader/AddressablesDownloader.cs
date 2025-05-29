@@ -697,7 +697,7 @@ namespace Arbelos.BuildUtility.Runtime
 
             List<DirectoryInfo> assetFolders = FindAssetFolders(_fileIds, _cachePath);
 
-            if (assetFolders.Count > 0)
+            if (assetFolders.Count > 0 && assetFolders.Count == _fileIds.Count)
             {
                 foreach (var folder in assetFolders)
                 {
@@ -769,7 +769,7 @@ namespace Arbelos.BuildUtility.Runtime
             }
             else
             {
-                Debug.LogError("[Addressables Downloader] No game file asset folders found!");
+                Debug.LogError("[Addressables Downloader] Not all game file asset folders found!");
                 return false;
             }
 
