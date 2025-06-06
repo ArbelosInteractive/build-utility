@@ -43,6 +43,7 @@ namespace Arbelos.BuildUtility.Editor
         //Build Variables
         BuildPlayerOptions customBuildOptions = new BuildPlayerOptions();
         bool alwaysAllowHTTP = true;
+        bool cleanPlayerAddressablesBuild = true;
         bool developmentBuild = false;
         bool scriptDebugging = false;
         bool waitForManagedDebugger = false;
@@ -63,8 +64,8 @@ namespace Arbelos.BuildUtility.Editor
             window.titleContent = new GUIContent("Seamless Build Tool");
 
             //Set min size of the window
-            window.minSize = new Vector2(500, 500);
-            window.maxSize = new Vector2(500, 500);
+            window.minSize = new Vector2(800, 800);
+            window.maxSize = new Vector2(800, 800);
 
             //Display the window on screen
             window.Show();
@@ -259,6 +260,15 @@ namespace Arbelos.BuildUtility.Editor
                 }
             }
 
+            GUILayout.EndHorizontal();
+            
+            GUILayout.Space(20);
+
+            GUILayout.BeginHorizontal();
+            GUILayout.Space(20);
+            GUILayout.Label($"Clean Addressables Build (When making a player build)?: ", styleSkin.GetStyle("BuildToolLabel"), GUILayout.ExpandWidth(false));
+            EditorGUI.BeginChangeCheck();
+            cleanPlayerAddressablesBuild = EditorGUILayout.Toggle("", cleanPlayerAddressablesBuild);
             GUILayout.EndHorizontal();
 
             if (addressableProfileNames[currentSelectedProfileIndex] != "EditorHosted")
@@ -486,6 +496,28 @@ namespace Arbelos.BuildUtility.Editor
             
             GUILayout.EndHorizontal();
             
+            GUILayout.Space(20);
+
+            GUILayout.BeginHorizontal();
+            GUILayout.Space(20);
+            if (GUILayout.Button("Update and Upload Previous Addressables Build", GUILayout.Height(35), GUILayout.Width(450), GUILayout.ExpandWidth(false)))
+            {
+                StartUpdateAndUploadAddressables();
+            }
+            
+            GUILayout.EndHorizontal();
+            
+            GUILayout.Space(20);
+            
+            GUILayout.BeginHorizontal();
+            GUILayout.Space(20);
+            if (GUILayout.Button("Only Update Previous Addressables Build", GUILayout.Height(35), GUILayout.Width(450), GUILayout.ExpandWidth(false)))
+            {
+                StartOnlyUpdateAddressablesBuild();
+            }
+            
+            GUILayout.EndHorizontal();
+            
             GUILayout.EndVertical();
             GUILayout.EndArea();
         }
@@ -544,6 +576,11 @@ namespace Arbelos.BuildUtility.Editor
             await CustomAddressableTools.BuildAddressables();
         }
 
+        private async Task UpdatePreviousAddressablesBuild()
+        {
+            await CustomAddressableTools.UpdatePreviousAddressablesBuild();
+        }
+
         private void StartBuild()
         {
             EditorApplication.update += BuildPlayer;
@@ -552,6 +589,11 @@ namespace Arbelos.BuildUtility.Editor
         private void StartOnlyAddressablesBuild()
         {
             EditorApplication.update += OnlyBuildAddressables;
+        }
+
+        private void StartOnlyUpdateAddressablesBuild()
+        {
+            EditorApplication.update += OnlyUpdateAddressables;
         }
         
         private void StartBuildAndUploadAddressables()
@@ -564,6 +606,16 @@ namespace Arbelos.BuildUtility.Editor
             EditorApplication.update += OnlyBuildAndUploadAddressables;
         }
 
+        private void StartUpdateAndUploadAddressables()
+        {
+            if (String.IsNullOrEmpty(azureSharedKey))
+            {
+                Debug.LogError("Please enter a azure shared key in order to upload the addressables.");
+                return;
+            }
+            EditorApplication.update += OnlyUpdateAndUploadAddressables;
+        }
+
         private async void OnlyBuildAndUploadAddressables()
         {
             if (!isBuilding)
@@ -573,6 +625,25 @@ namespace Arbelos.BuildUtility.Editor
                 EditorApplication.update -= OnlyBuildAndUploadAddressables;
 
                 await BuildAddressables();
+                
+                if (addressableProfileNames[currentSelectedProfileIndex] != "EditorHosted")
+                {
+                    await AzureUtilities.UploadAddressables(azureSharedKey);
+                }
+                
+                isBuilding = false;
+            }
+        }
+
+        private async void OnlyUpdateAndUploadAddressables()
+        {
+            if (!isBuilding)
+            {
+                isBuilding = true; 
+                
+                EditorApplication.update -= OnlyUpdateAndUploadAddressables;
+
+                await UpdatePreviousAddressablesBuild();
                 
                 if (addressableProfileNames[currentSelectedProfileIndex] != "EditorHosted")
                 {
@@ -597,6 +668,20 @@ namespace Arbelos.BuildUtility.Editor
             }
         }
 
+        private async void OnlyUpdateAddressables()
+        {
+            if (!isBuilding)
+            {
+                isBuilding = true; 
+                
+                EditorApplication.update -= OnlyUpdateAddressables;
+
+                await UpdatePreviousAddressablesBuild();
+                
+                isBuilding = false;
+            }
+        }
+
         private async void BuildPlayer()
         {
             if (!isBuilding)
@@ -607,7 +692,14 @@ namespace Arbelos.BuildUtility.Editor
 
                 SetupAndroidKeystore();
 
-                await BuildAddressables();
+                if (cleanPlayerAddressablesBuild)
+                {
+                    await BuildAddressables();
+                }
+                else
+                {
+                    await UpdatePreviousAddressablesBuild();
+                }
 
                 if (addressableProfileNames[currentSelectedProfileIndex] != "EditorHosted")
                 {

@@ -178,3 +178,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - ## [1.0.41] - 2025-05-29
 ### Fixed
 - Addressables Downloader - A skip asset list to optionally skip a few things and it's check.
+
+- ## [1.0.42] - 2025-06-06
+### Updated
+- Custom Addressable Tools and Custom Build Tools scripts: added support for making incremental addressable updates. 
+- Also increased the build tool window size to fit all the expanded content.

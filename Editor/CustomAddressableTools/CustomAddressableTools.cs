@@ -38,6 +38,8 @@ namespace Arbelos.BuildUtility.Editor
 
                 Directory.Delete(path);
                 Directory.CreateDirectory(path);
+                
+                Debug.Log("<color=orange>Cleared previous addressable files</color>");
             }
             
             AddressableAssetSettings.BuildPlayerContent();
@@ -47,17 +49,62 @@ namespace Arbelos.BuildUtility.Editor
             await GenerateCRCValues();
         }
         
-        public static void AzureFriendlyUpdatePreviousBuild()
+        public static async Task UpdatePreviousAddressablesBuild()
         {
-            var path = ContentUpdateScript.GetContentStateDataPath(true);
-            if (!string.IsNullOrEmpty(path))
+            // Deletes Old Addressables
+            var path = $"{Directory.GetCurrentDirectory()}/ServerData/{EditorUserBuildSettings.activeBuildTarget.ToString()}";
+
+            if (!Directory.Exists(path))
+            {
+                Directory.CreateDirectory(path);
+            }
+            else
+            {
+                var files = Directory.GetFiles(path);
+
+                foreach (var file in files)
+                {
+                    File.Delete(file);
+                }
+
+                Directory.Delete(path);
+                Directory.CreateDirectory(path);
+                
+                Debug.Log("<color=orange>Cleared previous addressable files</color>");
+            }
+            
+            var contentStatePath = ContentUpdateScript.GetContentStateDataPath(false);
+            if (!string.IsNullOrEmpty(contentStatePath))
             {
                 var azureFriendlyBuildTarget = CustomAddressableBuild.GetAzureFriendlyBuildTarget();
                 AddressablesRuntimeProperties.SetPropertyValue("AzureFriendlyBuildTarget", azureFriendlyBuildTarget);
 
-                ContentUpdateScript.BuildContentUpdate(AddressableAssetSettingsDefaultObject.Settings, path);
+                Application.logMessageReceived += HandleAddressableUpdateErrors;
+
+                ContentUpdateScript.BuildContentUpdate(AddressableAssetSettingsDefaultObject.Settings, contentStatePath);
 
                 Debug.Log("<color=orange>Finished updating previous build</color>");
+            }
+            else
+            {
+                AddressableAssetSettings.BuildPlayerContent();
+                Debug.Log("<color=orange>No existing state found to update - finish clean addressables build</color>");
+            }
+            
+            Application.logMessageReceived -= HandleAddressableUpdateErrors;
+
+            await GenerateCRCValues();
+        }
+
+        private static async void HandleAddressableUpdateErrors(string logString, string stackTrace, LogType type)
+        {
+            // Catch errors only
+            if (type == LogType.Error || type == LogType.Exception)
+            {
+                Debug.Log($"<color=orange>An Error occured while updating previous addressables build: {logString}</color>");
+                Debug.Log($"<color=orange>Making a clean addressable build instead</color>");
+                AddressableAssetSettings.BuildPlayerContent();
+                await GenerateCRCValues();
             }
         }
 
