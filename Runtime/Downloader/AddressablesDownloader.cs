@@ -224,7 +224,7 @@ namespace Arbelos.BuildUtility.Runtime
             if (updatedResourceLocators != null)
             {
                 //Clears old files before downloading new ones
-                PurgeAddressableFiles();
+                //PurgeAddressableFiles();
                 onUpdateAvailable?.Invoke();
                 var allKeys = updatedResourceLocators[0].Keys;
 
@@ -331,7 +331,7 @@ namespace Arbelos.BuildUtility.Runtime
             //Fetch stored CRC Data when addressables built.
             if (!ValidateCatalogFiles(addressableData.AddressableCRCList))
             {
-                PurgeAddressableFiles();
+                //PurgeAddressableFiles();
                 onValidationFail?.Invoke();
                 StartReDownload();
                 Debug.Log($"<color=orange>INVALID CATALOG FILES DETECTED!!</color>");
@@ -348,7 +348,7 @@ namespace Arbelos.BuildUtility.Runtime
 
             if (!ValidateGameFiles(addressableData.AddressableCRCList, assetsFileIds, cachePath))
             {
-                PurgeAddressableFiles();
+                //PurgeAddressableFiles();
                 onValidationFail?.Invoke();
                 StartReDownload();
                 Debug.Log($"<color=orange>INVALID GAME FILES DETECTED!!</color>");
@@ -827,14 +827,14 @@ namespace Arbelos.BuildUtility.Runtime
             return Crc32CAlgorithm.Compute(fromFileBytes);
         }
 
-        private async void PurgeAddressableFiles()
-        {
-            //Addressables.ClearDependencyCacheAsync(Addressables.ResourceLocators.FirstOrDefault().LocatorId);
-            //Addressables.ClearResourceLocators();
-
-            bool cacheCleared = Caching.ClearCache();
-            //PurgeCatalogFiles();
-        }
+        // private async void PurgeAddressableFiles()
+        // {
+        //     //Addressables.ClearDependencyCacheAsync(Addressables.ResourceLocators.FirstOrDefault().LocatorId);
+        //     //Addressables.ClearResourceLocators();
+        //
+        //     //bool cacheCleared = Caching.ClearCache();
+        //     //PurgeCatalogFiles();
+        // }
 
         private void PurgeCatalogFiles()
         {

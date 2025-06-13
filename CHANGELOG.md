@@ -183,3 +183,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 ### Updated
 - Custom Addressable Tools and Custom Build Tools scripts: added support for making incremental addressable updates. 
 - Also increased the build tool window size to fit all the expanded content.
+
+- ## [1.0.43] - 2025-06-13
+### Updated
+- Skip purging addressables files before downloading new ones
+- Add support cloud functions to update previous addressable build (incremental)

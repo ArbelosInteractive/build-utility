@@ -108,6 +108,18 @@ namespace Arbelos.BuildUtility.Editor
             }
         }
 
+        private static async void CloudBuild_HandleAddressableUpdateErrors(string logString, string stackTrace, LogType type)
+        {
+            // Catch errors only
+            if (type == LogType.Error || type == LogType.Exception)
+            {
+                Debug.Log($"<color=orange>An Error occured while updating previous addressables build: {logString}</color>");
+                Debug.Log($"<color=orange>Making a clean addressable build instead</color>");
+                AddressableAssetSettings.BuildPlayerContent();
+                await CloudBuild_GenerateCRCValues();
+            }
+        }
+
         public static async Task GenerateCRCValues(string addressablesBuildPath = null)
         {
             if (addressablesBuildPath == null)
@@ -220,6 +232,81 @@ namespace Arbelos.BuildUtility.Editor
             AssetDatabase.Refresh();
             Debug.Log("<color=orange>Finished Saving Addressable Game Data file with updated profile info</color>");
         }
-       
+
+        public static async void CloudBuild_BuildCleanAddressables(string addressablesBuildPath = null)
+        {
+            if (addressablesBuildPath == null)
+            {
+                string currentBuildTarget = EditorUserBuildSettings.activeBuildTarget.ToString();
+                addressablesBuildPath = Application.dataPath + "/../ServerData/" + currentBuildTarget;
+            }
+
+            if (Directory.Exists(addressablesBuildPath))
+            {
+                var files = Directory.GetFiles(addressablesBuildPath);
+
+                foreach (var file in files)
+                {
+                    File.Delete(file);
+                }
+
+                Directory.Delete(addressablesBuildPath);
+                Directory.CreateDirectory(addressablesBuildPath);
+                
+                Debug.Log("<color=orange>Cleared previous addressable files</color>");
+                
+                AddressableAssetSettings.BuildPlayerContent();
+            
+                Debug.Log(addressablesBuildPath);
+            
+                await CloudBuild_GenerateCRCValues(addressablesBuildPath);
+            }
+        }
+
+        public static async void CloudBuild_UpdatePreviousAddressablesBuild(string addressablesBuildPath = null)
+        {
+            if (addressablesBuildPath == null)
+            {
+                string currentBuildTarget = EditorUserBuildSettings.activeBuildTarget.ToString();
+                addressablesBuildPath = Application.dataPath + "/../ServerData/" + currentBuildTarget;
+            }
+
+            if (Directory.Exists(addressablesBuildPath))
+            {
+                var files = Directory.GetFiles(addressablesBuildPath);
+
+                foreach (var file in files)
+                {
+                    File.Delete(file);
+                }
+
+                Directory.Delete(addressablesBuildPath);
+                Directory.CreateDirectory(addressablesBuildPath);
+                
+                Debug.Log("<color=orange>Cleared previous addressable files</color>");
+                
+                var contentStatePath = ContentUpdateScript.GetContentStateDataPath(false);
+                if (!string.IsNullOrEmpty(contentStatePath))
+                {
+                    var azureFriendlyBuildTarget = CustomAddressableBuild.GetAzureFriendlyBuildTarget();
+                    AddressablesRuntimeProperties.SetPropertyValue("AzureFriendlyBuildTarget", azureFriendlyBuildTarget);
+
+                    Application.logMessageReceived += CloudBuild_HandleAddressableUpdateErrors;
+
+                    ContentUpdateScript.BuildContentUpdate(AddressableAssetSettingsDefaultObject.Settings, contentStatePath);
+
+                    Debug.Log("<color=orange>Finished updating previous build</color>");
+                }
+                else
+                {
+                    AddressableAssetSettings.BuildPlayerContent();
+                    Debug.Log("<color=orange>No existing state found to update - finish clean addressables build</color>");
+                }
+            
+                Application.logMessageReceived -= CloudBuild_HandleAddressableUpdateErrors;
+
+                await CloudBuild_GenerateCRCValues(addressablesBuildPath);
+            }
+        }
     }
 }
