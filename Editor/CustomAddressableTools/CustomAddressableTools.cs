@@ -233,7 +233,7 @@ namespace Arbelos.BuildUtility.Editor
             Debug.Log("<color=orange>Finished Saving Addressable Game Data file with updated profile info</color>");
         }
 
-        public static async void CloudBuild_BuildCleanAddressables(string addressablesBuildPath = null)
+        public static async Task CloudBuild_BuildCleanAddressables(string addressablesBuildPath = null)
         {
             if (addressablesBuildPath == null)
             {
@@ -263,7 +263,7 @@ namespace Arbelos.BuildUtility.Editor
             }
         }
 
-        public static async void CloudBuild_UpdatePreviousAddressablesBuild(string addressablesBuildPath = null)
+        public static async Task CloudBuild_UpdatePreviousAddressablesBuild(string addressablesBuildPath = null)
         {
             if (addressablesBuildPath == null)
             {

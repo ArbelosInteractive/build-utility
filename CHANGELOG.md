@@ -188,3 +188,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 ### Updated
 - Skip purging addressables files before downloading new ones
 - Add support cloud functions to update previous addressable build (incremental)
+
+- ## [1.0.44] - 2025-06-13
+### Updated
+- Fix async script error
