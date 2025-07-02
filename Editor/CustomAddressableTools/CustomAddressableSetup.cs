@@ -4,7 +4,9 @@ using UnityEditor.AddressableAssets;
 using UnityEditor.AddressableAssets.Settings;
 using UnityEditor.AddressableAssets.Settings.GroupSchemas;
 using Arbelos.BuildUtility.Runtime;
+#if !UNITY_2023_1_OR_NEWER
 using UnityEditor.AddressableAssets.HostingServices;
+#endif
 using System.Linq;
 
 namespace Arbelos.BuildUtility.Editor
@@ -105,7 +107,7 @@ namespace Arbelos.BuildUtility.Editor
 
         private static void CreateAddressableHostingService()
         {
-
+#if !UNITY_2023_1_OR_NEWER
             var hostingService = settings.HostingServicesManager.AddHostingService(typeof(HttpHostingService), "Local Hosting");
             if (hostingService == null)
             {
@@ -118,7 +120,7 @@ namespace Arbelos.BuildUtility.Editor
                 int randomPort = Random.Range(60000, 70000);
                 httpService.ResetListenPort(randomPort);
             }
-
+#endif
 
             EditorUtility.SetDirty(settings);
             AssetDatabase.SaveAssets();

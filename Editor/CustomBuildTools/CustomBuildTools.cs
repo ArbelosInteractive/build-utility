@@ -3,7 +3,9 @@ using System.Linq;
 using System.Threading.Tasks;
 using UnityEditor;
 using UnityEditor.AddressableAssets;
+#if !UNITY_2023_1_OR_NEWER
 using UnityEditor.AddressableAssets.HostingServices;
+#endif
 using UnityEditor.AddressableAssets.Settings;
 using UnityEditor.Build.Reporting;
 using UnityEngine;
@@ -36,7 +38,9 @@ namespace Arbelos.BuildUtility.Editor
         //Data Variables
         private AddressableAssetSettings assetSettings;
         private AddressableAssetProfileSettings assetProfileSettings;
+#if !UNITY_2023_1_OR_NEWER
         private IHostingService localHostingService;
+#endif
         private int currentSelectedProfileIndex = 0;
         private string[] addressableProfileNames = new string[] { };
 
@@ -151,7 +155,9 @@ namespace Arbelos.BuildUtility.Editor
             addressableProfileNames = assetProfileSettings.GetAllProfileNames().ToArray();
             var activeProfileName = assetProfileSettings.GetProfileName(assetSettings.activeProfileId);
             currentSelectedProfileIndex = Array.IndexOf(addressableProfileNames, activeProfileName);
+#if !UNITY_2023_1_OR_NEWER
             localHostingService = assetSettings.HostingServicesManager.HostingServices.First();
+#endif
             if (addressableProfileNames[currentSelectedProfileIndex] != "EditorHosted")
             {
 #if UNITY_2022_3_OR_NEWER
@@ -160,10 +166,12 @@ namespace Arbelos.BuildUtility.Editor
                     PlayerSettings.insecureHttpOption = InsecureHttpOption.NotAllowed;
                 }
 #endif
+#if !UNITY_2023_1_OR_NEWER
                 if (localHostingService != null && localHostingService.IsHostingServiceRunning)
                 {
                     localHostingService.StopHostingService();
                 }
+#endif
             }
             else
             {
@@ -173,10 +181,12 @@ namespace Arbelos.BuildUtility.Editor
                     PlayerSettings.insecureHttpOption = InsecureHttpOption.AlwaysAllowed;
                 }
 #endif
+#if !UNITY_2023_1_OR_NEWER
                 if (localHostingService != null && !localHostingService.IsHostingServiceRunning)
                 {
                     localHostingService.StartHostingService();
                 }
+#endif
             }
 
             //Initially save the addressable profile data to make sure latest changes are saved
@@ -221,20 +231,24 @@ namespace Arbelos.BuildUtility.Editor
 #if UNITY_2022_3_OR_NEWER
                     PlayerSettings.insecureHttpOption = InsecureHttpOption.NotAllowed;
 #endif
+#if !UNITY_2023_1_OR_NEWER
                     if (localHostingService != null && localHostingService.IsHostingServiceRunning)
                     {
                         localHostingService.StopHostingService();
                     }
+#endif
                 }
                 else
                 {
 #if UNITY_2022_3_OR_NEWER
                     PlayerSettings.insecureHttpOption = InsecureHttpOption.AlwaysAllowed;
 #endif
+#if !UNITY_2023_1_OR_NEWER
                     if (localHostingService != null && !localHostingService.IsHostingServiceRunning)
                     {
                         localHostingService.StartHostingService();
                     }
+#endif
                 }
             }
             GUILayout.EndHorizontal();
