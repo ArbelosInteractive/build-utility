@@ -196,3 +196,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - ## [1.0.45] - 2025-07-02
 ### Updated
 - Comment out local hosting for unity 2023 or newer to fix unity 6.0 errors
+
+- ## [1.0.46] - 2025-10-10
+### Updated
+- Fix Unity 6.0 - Changed Naming Convention Errors.

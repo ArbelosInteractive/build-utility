@@ -8,6 +8,7 @@ using Arbelos.BuildUtility.Runtime;
 using UnityEditor.AddressableAssets.HostingServices;
 #endif
 using System.Linq;
+using UnityEditor.AddressableAssets.Build;
 
 namespace Arbelos.BuildUtility.Editor
 {
@@ -58,8 +59,15 @@ namespace Arbelos.BuildUtility.Editor
                 settings.UniqueBundleIds = false;
                 settings.ContiguousBundles = true;
                 settings.NonRecursiveBuilding = true;
-                settings.ShaderBundleNaming = UnityEditor.AddressableAssets.Build.ShaderBundleNaming.ProjectName;
-                settings.MonoScriptBundleNaming = UnityEditor.AddressableAssets.Build.MonoScriptBundleNaming.Disabled;
+#if UNITY_6000_0_OR_NEWER
+                // Unity 6 + Addressables 2.7.x
+                settings.BuiltInBundleNaming     = BuiltInBundleNaming.ProjectName;   // was ShaderBundleNaming
+                settings.MonoScriptBundleNaming  = MonoScriptBundleNaming.ProjectName; // "Disabled" was removed
+#else
+                // Older Unity / Addressables
+                settings.ShaderBundleNaming      = ShaderBundleNaming.ProjectName;
+                settings.MonoScriptBundleNaming  = MonoScriptBundleNaming.Disabled;
+#endif
                 if (customBuildAsset != null)
                 {
                     //Remove the last databuilder script from the settings and add the customBuidAsset as the last one.
@@ -147,7 +155,13 @@ namespace Arbelos.BuildUtility.Editor
         private static void SetBuiltInDataSettings()
         {
             // Find the Built-In Data Addressable Asset group
+#if UNITY_6000_0_OR_NEWER
+            // Unity 6 / Addressables 2.7.x+: use the literal
+            AddressableAssetGroup builtInDataGroup = settings.FindGroup("Built In Data");
+#else
+            // Older Addressables: keep using the constant
             AddressableAssetGroup builtInDataGroup = settings.FindGroup(AddressableAssetSettings.PlayerDataGroupName);
+#endif
 
             if (builtInDataGroup == null)
             {
