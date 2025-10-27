@@ -8,7 +8,6 @@ using System.Collections.Generic;
 using UnityEngine.AddressableAssets.ResourceLocators;
 using Force.Crc32;
 using UnityEngine.ResourceManagement.AsyncOperations;
-using Newtonsoft.Json;
 using System;
 using System.Collections;
 using System.Threading;
@@ -119,6 +118,14 @@ namespace Arbelos.BuildUtility.Runtime
             var dataCatalogHash = addressableData.AddressableCRCList.Find(x => x.key.Contains(".hash"));
             var dataCatalogJson = addressableData.AddressableCRCList.Find(x => x.key.Contains(".json"));
             
+#if UNITY_6000_0_OR_NEWER
+            if(dataCatalogJson == null)
+            {
+                dataCatalogJson = addressableData.AddressableCRCList.Find(x => x.key.Contains(".bin"));
+            }
+#endif
+           
+            
             string path = Application.persistentDataPath + "/com.unity.addressables/";
             if (Directory.Exists(path))
             {
@@ -165,6 +172,13 @@ namespace Arbelos.BuildUtility.Runtime
 
                 //now get all the json files
                 FileInfo[] allJsonFiles = dir.GetFiles("catalog*.json").OrderByDescending(p => p.LastWriteTime).ToArray();
+                
+#if UNITY_6000_0_OR_NEWER
+                if(allJsonFiles.Length == 0)
+                {
+                    allJsonFiles = dir.GetFiles("catalog*.bin").OrderByDescending(p => p.LastWriteTime).ToArray();
+                }
+#endif
                 
                 //Get the current addressable data json file
                 string jsonFilePath = Path.Combine(dir.FullName, dataCatalogJson.key);
@@ -663,6 +677,13 @@ namespace Arbelos.BuildUtility.Runtime
                 FileInfo[] files = dir.GetFiles("catalog*.hash");
                 //now the json files
                 FileInfo[] jsonfiles = dir.GetFiles("catalog*.json");
+                
+#if UNITY_6000_0_OR_NEWER
+                if(jsonfiles.Length == 0)
+                {
+                    jsonfiles = dir.GetFiles("catalog*.bin");
+                }
+#endif
 
                 if (files.Length > 0 && jsonfiles.Length > 0)
                 {
@@ -695,6 +716,20 @@ namespace Arbelos.BuildUtility.Runtime
                                 return false;
                             }
                         }
+#if UNITY_6000_0_OR_NEWER
+                        else if (data.key.Contains(".bin"))
+                        {
+                            if (data.value == jsonFileValue)
+                            {
+                                isValid = true;
+                            }
+                            else
+                            {
+                                Debug.LogError($"[Addressables Downloader] Catalog File: {data.key} is invalid.");
+                                return false;
+                            }
+                        }
+#endif
                     }
                 }
                 else
@@ -858,6 +893,13 @@ namespace Arbelos.BuildUtility.Runtime
                 //now the json files
                 FileInfo[] jsonfiles = dir.GetFiles("catalog*.json").OrderByDescending(p => p.LastWriteTime).ToArray();
 
+#if UNITY_6000_0_OR_NEWER
+                if(jsonfiles.Length == 0)
+                {
+                    jsonfiles = dir.GetFiles("catalog*.bin").OrderByDescending(p => p.LastWriteTime).ToArray();
+                }
+#endif
+                
                 if (jsonfiles.Length > 0)
                 {
                     for (int i = 0; i < jsonfiles.Length; i++)

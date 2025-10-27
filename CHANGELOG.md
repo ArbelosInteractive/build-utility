@@ -200,3 +200,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - ## [1.0.46] - 2025-10-10
 ### Updated
 - Fix Unity 6.0 - Changed Naming Convention Errors.
+
+- ## [1.0.47] - 2025-10-27
+### Updated
+- Fix Unity 6.0 - Added support for .bin catalog files post addressables package update in unity 6.
