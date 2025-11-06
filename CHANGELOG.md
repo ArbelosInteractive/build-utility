@@ -204,3 +204,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - ## [1.0.47] - 2025-10-27
 ### Updated
 - Fix Unity 6.0 - Added support for .bin catalog files post addressables package update in unity 6.
+
+- ## [1.0.48] - 2025-11-06
+### Updated
+- Addressables Downloader - Updated LoadCustomContentCatalog() method to return IResourceLocator created during content loading 
