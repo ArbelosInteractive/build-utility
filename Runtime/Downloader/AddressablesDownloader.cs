@@ -253,7 +253,7 @@ namespace Arbelos.BuildUtility.Runtime
 
                 // Await a coroutine using TaskCompletionSource
                 var tcs = new TaskCompletionSource<bool>();
-                DownloadKeysAsync(pendingKeys, success => { tcs.SetResult(success); });
+                await DownloadKeysAsync(pendingKeys, success => { tcs.SetResult(success); });
 
                 return await tcs.Task;
             }
@@ -911,17 +911,16 @@ namespace Arbelos.BuildUtility.Runtime
             }
         }
         
-        public async void LoadCustomContentCatalog(string remotePath)
+        public async Task<IResourceLocator> LoadCustomContentCatalog(string remotePath)
         {
             if (string.IsNullOrEmpty(remotePath))
             {
                 Debug.LogError("No remotePath when trying to load addressable");
-                return;
+                return null;
             }
 
             //Load a catalog from sever and automatically release the operation handle.
-            AsyncOperationHandle <IResourceLocator> handle
-                = Addressables.LoadContentCatalogAsync(remotePath, false);
+            var handle = Addressables.LoadContentCatalogAsync(remotePath, false);
             
             await handle.Task;
                 
@@ -933,8 +932,11 @@ namespace Arbelos.BuildUtility.Runtime
             {
                 Debug.LogError($"Loading Custom Content Catalog failed: {remotePath}");
             }
-                
+            
+            var ret = handle.Result;
             Addressables.Release(handle);
+
+            return ret;
         }
     }
 }
