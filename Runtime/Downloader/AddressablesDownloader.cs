@@ -253,7 +253,7 @@ namespace Arbelos.BuildUtility.Runtime
 
                 // Await a coroutine using TaskCompletionSource
                 var tcs = new TaskCompletionSource<bool>();
-                await DownloadKeysAsync(pendingKeys, success => { tcs.SetResult(success); });
+                DownloadKeysAsync(pendingKeys, success => { tcs.SetResult(success); });
 
                 return await tcs.Task;
             }
