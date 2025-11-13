@@ -127,10 +127,11 @@ namespace Arbelos.BuildUtility.Runtime
            
             
             string path = "";
-            #if UNITY_6000_0_OR_NEWER
-                    path = Path.Combine(Application.persistentDataPath, "Unity/Addressables");
-            #else
-                    path = Path.Combine(Application.persistentDataPath, "com.unity.addressables");
+#if UNITY_6000_0_OR_NEWER
+                    path = Caching.currentCacheForWriting.path;
+                    //path = Path.Combine(Application.persistentDataPath, "Unity/Addressables");
+#else
+            path = Path.Combine(Application.persistentDataPath, "com.unity.addressables");
             #endif
             if (Directory.Exists(path))
             {
@@ -595,7 +596,8 @@ namespace Arbelos.BuildUtility.Runtime
             //Refresh the catalog directory.
             string path = "";
 #if UNITY_6000_0_OR_NEWER
-            path = Path.Combine(Application.persistentDataPath, "Unity/Addressables");
+                    path = Caching.currentCacheForWriting.path;
+                    //path = Path.Combine(Application.persistentDataPath, "Unity/Addressables");
 #else
             path = Path.Combine(Application.persistentDataPath, "com.unity.addressables");
 #endif
@@ -679,7 +681,8 @@ namespace Arbelos.BuildUtility.Runtime
             bool isValid = false;
             string path = "";
 #if UNITY_6000_0_OR_NEWER
-            path = Path.Combine(Application.persistentDataPath, "Unity/Addressables");
+                    path = Caching.currentCacheForWriting.path;
+                    //path = Path.Combine(Application.persistentDataPath, "Unity/Addressables");
 #else
             path = Path.Combine(Application.persistentDataPath, "com.unity.addressables");
 #endif
@@ -890,7 +893,8 @@ namespace Arbelos.BuildUtility.Runtime
         {
             string path = "";
 #if UNITY_6000_0_OR_NEWER
-            path = Path.Combine(Application.persistentDataPath, "Unity/Addressables");
+                    path = Caching.currentCacheForWriting.path;
+                    //path = Path.Combine(Application.persistentDataPath, "Unity/Addressables");
 #else
             path = Path.Combine(Application.persistentDataPath, "com.unity.addressables");
 #endif
