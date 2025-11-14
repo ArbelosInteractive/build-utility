@@ -271,6 +271,7 @@ namespace Arbelos.BuildUtility.Runtime
         {
             string cachePath = System.IO.Path.Combine(Application.persistentDataPath, "AddressablesCache");
 
+            Directory.CreateDirectory(cachePath);
             // Create or get cache
             Cache customCache = Caching.GetCacheByPath(cachePath);
             if (!customCache.valid)
