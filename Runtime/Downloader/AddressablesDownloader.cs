@@ -281,6 +281,9 @@ namespace Arbelos.BuildUtility.Runtime
             {
                 string id = loc.InternalId;
 
+                if (id.EndsWith("settings.json"))
+                    return id;
+
                 if (id.EndsWith(".json") || id.EndsWith(".hash") || id.EndsWith(".bin"))
                 {
                     string fileName = Path.GetFileName(id);
