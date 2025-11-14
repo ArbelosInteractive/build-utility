@@ -267,6 +267,29 @@ namespace Arbelos.BuildUtility.Runtime
             return true;
         }
 
+        public void InitializeCache()
+        {
+            string cachePath = System.IO.Path.Combine(Application.persistentDataPath, "AddressablesCache");
+
+            // Create or get cache
+            Cache customCache = Caching.GetCacheByPath(cachePath);
+            if (!customCache.valid)
+            {
+                customCache = Caching.AddCache(cachePath);
+            }
+
+            // Assign as active cache for writing
+            if (customCache.valid)
+            {
+                Caching.currentCacheForWriting = customCache;
+                Debug.Log("Using Addressables cache: " + customCache.path);
+            }
+            else
+            {
+                Debug.LogError("Could not create addressables cache!");
+            }
+        }
+
         public async void Initialize()
         {
             wasConnected = Application.internetReachability != NetworkReachability.NotReachable;
@@ -281,6 +304,8 @@ namespace Arbelos.BuildUtility.Runtime
 #if !UNITY_EDITOR
             addressableData = Resources.Load<GameAddressableData>("GameAddressableData");
 #endif
+            InitializeCache();
+
             // Refresh Directories before doing anything
             RefreshCacheAndCatalogDirectories();
 
