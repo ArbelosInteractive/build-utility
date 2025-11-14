@@ -6,6 +6,7 @@ using UnityEngine.Events;
 using UnityEngine.AddressableAssets;
 using System.Collections.Generic;
 using UnityEngine.AddressableAssets.ResourceLocators;
+using UnityEngine.ResourceManagement.ResourceLocations;
 using Force.Crc32;
 using UnityEngine.ResourceManagement.AsyncOperations;
 using System;
