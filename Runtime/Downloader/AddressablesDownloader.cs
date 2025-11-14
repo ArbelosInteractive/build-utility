@@ -128,7 +128,8 @@ namespace Arbelos.BuildUtility.Runtime
             
             string path = "";
 #if UNITY_6000_0_OR_NEWER
-                    path = Caching.currentCacheForWriting.path;
+                    path = Path.Combine(Application.persistentDataPath, "CatalogCache");
+                    //path = Caching.currentCacheForWriting.path;
                     //path = Path.Combine(Application.persistentDataPath, "Unity/Addressables");
 #else
             path = Path.Combine(Application.persistentDataPath, "com.unity.addressables");
@@ -267,11 +268,36 @@ namespace Arbelos.BuildUtility.Runtime
             return true;
         }
 
+        public void InitializeCatalogCache()
+        {
+            string customPath = Path.Combine(Application.persistentDataPath, "CatalogCache");
+            if (!Directory.Exists(customPath))
+            {
+                Directory.CreateDirectory(customPath);
+            }
+
+            Addressables.ResourceManager.InternalIdTransformFunc = (IResourceLocation loc) =>
+            {
+                string id = loc.InternalId;
+
+                if (id.EndsWith(".json") || id.EndsWith(".hash") || id.EndsWith(".bin"))
+                {
+                    string fileName = Path.GetFileName(id);
+                    return Path.Combine(customPath, fileName);
+                }
+
+                return id;
+            };
+        }
+
         public void InitializeCache()
         {
             string cachePath = System.IO.Path.Combine(Application.persistentDataPath, "AddressablesCache");
 
-            Directory.CreateDirectory(cachePath);
+            if (!Directory.Exists(cachePath))
+            {
+                Directory.CreateDirectory(cachePath);
+            }
             // Create or get cache
             Cache customCache = Caching.GetCacheByPath(cachePath);
             if (!customCache.valid)
@@ -305,6 +331,7 @@ namespace Arbelos.BuildUtility.Runtime
 #if !UNITY_EDITOR
             addressableData = Resources.Load<GameAddressableData>("GameAddressableData");
 #endif
+            InitializeCatalogCache();
             InitializeCache();
 
             // Refresh Directories before doing anything
@@ -622,7 +649,8 @@ namespace Arbelos.BuildUtility.Runtime
             //Refresh the catalog directory.
             string path = "";
 #if UNITY_6000_0_OR_NEWER
-                    path = Caching.currentCacheForWriting.path;
+                    path = Path.Combine(Application.persistentDataPath, "CatalogCache");
+                    //path = Caching.currentCacheForWriting.path;
                     //path = Path.Combine(Application.persistentDataPath, "Unity/Addressables");
 #else
             path = Path.Combine(Application.persistentDataPath, "com.unity.addressables");
@@ -707,7 +735,8 @@ namespace Arbelos.BuildUtility.Runtime
             bool isValid = false;
             string path = "";
 #if UNITY_6000_0_OR_NEWER
-                    path = Caching.currentCacheForWriting.path;
+                    path = Path.Combine(Application.persistentDataPath, "CatalogCache");
+                    //path = Caching.currentCacheForWriting.path;
                     //path = Path.Combine(Application.persistentDataPath, "Unity/Addressables");
 #else
             path = Path.Combine(Application.persistentDataPath, "com.unity.addressables");
@@ -919,7 +948,8 @@ namespace Arbelos.BuildUtility.Runtime
         {
             string path = "";
 #if UNITY_6000_0_OR_NEWER
-                    path = Caching.currentCacheForWriting.path;
+                    path = Path.Combine(Application.persistentDataPath, "CatalogCache");
+                    //path = Caching.currentCacheForWriting.path;
                     //path = Path.Combine(Application.persistentDataPath, "Unity/Addressables");
 #else
             path = Path.Combine(Application.persistentDataPath, "com.unity.addressables");
