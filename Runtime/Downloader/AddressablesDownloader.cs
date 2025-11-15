@@ -281,12 +281,13 @@ namespace Arbelos.BuildUtility.Runtime
             {
                 string id = loc.InternalId;
 
+                Debug.Log("PATH: " + id);
+
                 if (id.StartsWith("http") || id.StartsWith("https"))
                     return id;
 
                 if(id.EndsWith("settings.json") || id.EndsWith("catalog.json") || id.EndsWith("catalog.hash") || id.EndsWith("catalog.bin"))
                 {
-                    Debug.Log("PATH: " + id);
                     return id;
                 }    
 
