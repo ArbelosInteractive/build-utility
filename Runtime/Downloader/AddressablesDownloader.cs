@@ -284,6 +284,12 @@ namespace Arbelos.BuildUtility.Runtime
                 if (id.StartsWith("http") || id.StartsWith("https"))
                     return id;
 
+                if(id.EndsWith("settings.json") || id.EndsWith("catalog.json") || id.EndsWith("catalog.hash") || id.EndsWith("catalog.bin"))
+                {
+                    Debug.Log("PATH: " + id);
+                    return id;
+                }    
+
                 if (id.EndsWith(".json") || id.EndsWith(".hash") || id.EndsWith(".bin"))
                 {
                     string fileName = Path.GetFileName(id);
