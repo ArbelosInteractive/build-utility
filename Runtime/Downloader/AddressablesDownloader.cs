@@ -129,7 +129,7 @@ namespace Arbelos.BuildUtility.Runtime
             
             string path = "";
 #if UNITY_6000_0_OR_NEWER
-                    path = Path.Combine(Application.persistentDataPath, "CatalogCache");
+                    path = Path.Combine(Application.persistentDataPath, "UnityCache", "Addressables");
                     //path = Caching.currentCacheForWriting.path;
                     //path = Path.Combine(Application.persistentDataPath, "Unity/Addressables");
 #else
@@ -343,8 +343,8 @@ namespace Arbelos.BuildUtility.Runtime
 #if !UNITY_EDITOR
             addressableData = Resources.Load<GameAddressableData>("GameAddressableData");
 #endif
-            InitializeCatalogCache();
-            InitializeCache();
+            //InitializeCatalogCache();
+            //InitializeCache();
 
             // Refresh Directories before doing anything
             RefreshCacheAndCatalogDirectories();
@@ -661,7 +661,7 @@ namespace Arbelos.BuildUtility.Runtime
             //Refresh the catalog directory.
             string path = "";
 #if UNITY_6000_0_OR_NEWER
-                    path = Path.Combine(Application.persistentDataPath, "CatalogCache");
+                    path = Path.Combine(Application.persistentDataPath, "UnityCache","Addressables");
                     //path = Caching.currentCacheForWriting.path;
                     //path = Path.Combine(Application.persistentDataPath, "Unity/Addressables");
 #else
@@ -747,7 +747,7 @@ namespace Arbelos.BuildUtility.Runtime
             bool isValid = false;
             string path = "";
 #if UNITY_6000_0_OR_NEWER
-                    path = Path.Combine(Application.persistentDataPath, "CatalogCache");
+                    path = Path.Combine(Application.persistentDataPath, "UnityCache", "Addressables");
                     //path = Caching.currentCacheForWriting.path;
                     //path = Path.Combine(Application.persistentDataPath, "Unity/Addressables");
 #else
@@ -960,7 +960,7 @@ namespace Arbelos.BuildUtility.Runtime
         {
             string path = "";
 #if UNITY_6000_0_OR_NEWER
-                    path = Path.Combine(Application.persistentDataPath, "CatalogCache");
+                    path = Path.Combine(Application.persistentDataPath, "UnityCache","Addressables");
                     //path = Caching.currentCacheForWriting.path;
                     //path = Path.Combine(Application.persistentDataPath, "Unity/Addressables");
 #else
