@@ -282,20 +282,21 @@ namespace Arbelos.BuildUtility.Runtime
                 string id = loc.InternalId;
 
                 Debug.Log("PATH: " + id);
+                Debug.Log("RESOLVED PATH: " + Addressables.ResolveInternalId(loc.InternalId));
 
-                if (id.StartsWith("http") || id.StartsWith("https"))
-                    return id;
+                //if (id.StartsWith("http") || id.StartsWith("https"))
+                //    return id;
 
-                if(id.EndsWith("settings.json") || id.EndsWith("catalog.json") || id.EndsWith("catalog.hash") || id.EndsWith("catalog.bin"))
-                {
-                    return id;
-                }    
+                //if(id.EndsWith("settings.json") || id.EndsWith("catalog.json") || id.EndsWith("catalog.hash") || id.EndsWith("catalog.bin"))
+                //{
+                //    return id;
+                //}    
 
-                if (id.EndsWith(".json") || id.EndsWith(".hash") || id.EndsWith(".bin"))
-                {
-                    string fileName = Path.GetFileName(id);
-                    return "file://" + Path.Combine(customPath, fileName);
-                }
+                //if (id.EndsWith(".json") || id.EndsWith(".hash") || id.EndsWith(".bin"))
+                //{
+                //    string fileName = Path.GetFileName(id);
+                //    return "file://" + Path.Combine(customPath, fileName);
+                //}
 
                 return id;
             };
