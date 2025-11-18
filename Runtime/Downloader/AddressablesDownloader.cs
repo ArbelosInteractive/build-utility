@@ -301,7 +301,7 @@ namespace Arbelos.BuildUtility.Runtime
 
                 if (www.result != UnityWebRequest.Result.Success)
                 {
-                    Debug.LogError("Error downloading file from Azure: " + webRequest.error);
+                    Debug.LogError("Error downloading file from Azure: " + www.error);
                 }
                 else
                 {
