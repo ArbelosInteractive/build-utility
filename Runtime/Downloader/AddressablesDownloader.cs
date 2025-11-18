@@ -4,6 +4,7 @@ using UnityEngine;
 using System.Threading.Tasks;
 using UnityEngine.Events;
 using UnityEngine.AddressableAssets;
+using UnityEngine.Networking;
 using System.Collections.Generic;
 using UnityEngine.AddressableAssets.ResourceLocators;
 using UnityEngine.ResourceManagement.ResourceLocations;
@@ -269,38 +270,57 @@ namespace Arbelos.BuildUtility.Runtime
             return true;
         }
 
-        public void InitializeCatalogCache()
+        public async Task InitializeCatalogCache()
         {
-            string customPath = Path.Combine(Application.persistentDataPath, "CatalogCache");
+#if !UNITY_EDITOR
+            string customPath = Path.Combine(Application.persistentDataPath, "com.unity.addressables");
             if (!Directory.Exists(customPath))
             {
                 Directory.CreateDirectory(customPath);
+
+                string fileName = addressableData.AddressableCRCList.Find(x => x.key.EndsWith(".hash")).key;
+
+                string url = "";
+
+#if UNITY_ANDROID
+                url = "https://tsw-eud3b6hahvdfeufk.z02.azurefd.net/android/" + fileName;
+#endif
+#if UNITY_IOS
+                url = "https://tsw-eud3b6hahvdfeufk.z02.azurefd.net/ios/" + fileName;
+#endif
+
+                UnityWebRequest www = UnityWebRequest.Get(url);
+
+                www.downloadHandler = new DownloadHandlerBuffer();
+
+                var operation = www.SendWebRequest();
+
+                while(!operation.isDone)
+                {
+                    await Task.Yield();
+                }
+
+                if (www.result != UnityWebRequest.Result.Success)
+                {
+                    Debug.LogError("Error downloading file from Azure: " + webRequest.error);
+                }
+                else
+                {
+                    Debug.Log("File successfully downloaded from Azure!");
+
+                    // Access the downloaded data
+                    byte[] data = www.downloadHandler.data;
+
+                    // Example: Save the data to a local file path
+                    string savePath = Path.Combine(customPath, fileName);
+                    await File.WriteAllBytesAsync(savePath, data); // Asynchronously write to disk
+
+                    Debug.Log("File saved to: " + savePath);
+                }
             }
 
-            Addressables.ResourceManager.InternalIdTransformFunc = (IResourceLocation loc) =>
-            {
-                string id = loc.InternalId;
-
-                Debug.Log("PATH: " + id);
-                Debug.Log("RESOLVED PATH: " + Addressables.ResolveInternalId(loc.InternalId));
-
-                //if (id.StartsWith("http") || id.StartsWith("https"))
-                //    return id;
-
-                //if(id.EndsWith("settings.json") || id.EndsWith("catalog.json") || id.EndsWith("catalog.hash") || id.EndsWith("catalog.bin"))
-                //{
-                //    return id;
-                //}    
-
-                //if (id.EndsWith(".json") || id.EndsWith(".hash") || id.EndsWith(".bin"))
-                //{
-                //    string fileName = Path.GetFileName(id);
-                //    return "file://" + Path.Combine(customPath, fileName);
-                //}
-
-                return id;
-            };
-        }
+#endif
+            }
 
         public void InitializeCache()
         {
@@ -343,7 +363,7 @@ namespace Arbelos.BuildUtility.Runtime
 #if !UNITY_EDITOR
             addressableData = Resources.Load<GameAddressableData>("GameAddressableData");
 #endif
-            //InitializeCatalogCache();
+            await InitializeCatalogCache();
             //InitializeCache();
 
             // Refresh Directories before doing anything
@@ -660,13 +680,13 @@ namespace Arbelos.BuildUtility.Runtime
         {
             //Refresh the catalog directory.
             string path = "";
-#if UNITY_6000_0_OR_NEWER
-                    path = Path.Combine(Application.persistentDataPath, "UnityCache","Addressables");
-                    //path = Caching.currentCacheForWriting.path;
-                    //path = Path.Combine(Application.persistentDataPath, "Unity/Addressables");
-#else
+//#if UNITY_6000_0_OR_NEWER
+//                    path = Path.Combine(Application.persistentDataPath, "UnityCache","Addressables");
+//                    //path = Caching.currentCacheForWriting.path;
+//                    //path = Path.Combine(Application.persistentDataPath, "Unity/Addressables");
+//#else
             path = Path.Combine(Application.persistentDataPath, "com.unity.addressables");
-#endif
+//#endif
             if (Directory.Exists(path))
             {
                 DirectoryInfo dir = new DirectoryInfo(path);
@@ -746,13 +766,13 @@ namespace Arbelos.BuildUtility.Runtime
             ClearPreviousCatalog();
             bool isValid = false;
             string path = "";
-#if UNITY_6000_0_OR_NEWER
-                    path = Path.Combine(Application.persistentDataPath, "UnityCache", "Addressables");
-                    //path = Caching.currentCacheForWriting.path;
-                    //path = Path.Combine(Application.persistentDataPath, "Unity/Addressables");
-#else
+//#if UNITY_6000_0_OR_NEWER
+//                    path = Path.Combine(Application.persistentDataPath, "UnityCache", "Addressables");
+//                    //path = Caching.currentCacheForWriting.path;
+//                    //path = Path.Combine(Application.persistentDataPath, "Unity/Addressables");
+//#else
             path = Path.Combine(Application.persistentDataPath, "com.unity.addressables");
-#endif
+//#endif
             if (Directory.Exists(path))
             {
                 DirectoryInfo dir = new DirectoryInfo(path);
@@ -959,13 +979,13 @@ namespace Arbelos.BuildUtility.Runtime
         private void PurgeCatalogFiles()
         {
             string path = "";
-#if UNITY_6000_0_OR_NEWER
-                    path = Path.Combine(Application.persistentDataPath, "UnityCache","Addressables");
-                    //path = Caching.currentCacheForWriting.path;
-                    //path = Path.Combine(Application.persistentDataPath, "Unity/Addressables");
-#else
+//#if UNITY_6000_0_OR_NEWER
+//                    path = Path.Combine(Application.persistentDataPath, "UnityCache","Addressables");
+//                    //path = Caching.currentCacheForWriting.path;
+//                    //path = Path.Combine(Application.persistentDataPath, "Unity/Addressables");
+//#else
             path = Path.Combine(Application.persistentDataPath, "com.unity.addressables");
-#endif
+//#endif
             if (Directory.Exists(path))
             {
                 DirectoryInfo dir = new DirectoryInfo(path);
