@@ -272,7 +272,6 @@ namespace Arbelos.BuildUtility.Runtime
 
         public async Task InitializeCatalogCache()
         {
-#if !UNITY_EDITOR
             string customPath = Path.Combine(Application.persistentDataPath, "com.unity.addressables");
             if (!Directory.Exists(customPath))
             {
@@ -318,8 +317,6 @@ namespace Arbelos.BuildUtility.Runtime
                     Debug.Log("File saved to: " + savePath);
                 }
             }
-
-#endif
             }
 
         public void InitializeCache()
