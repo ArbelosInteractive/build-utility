@@ -1,6 +1,6 @@
 {
   "name": "com.arbelos.buildutility",
-  "version": "1.0.49",
+  "version": "1.0.48",
   "displayName": "Build Utility",
   "description": "A package of scripts for automated build utility",
   "unity": "2021.3",
