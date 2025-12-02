@@ -545,11 +545,12 @@ namespace Arbelos.BuildUtility.Runtime
 
             foreach (var entry in data)
             {
-                if (entry == null || string.IsNullOrEmpty(entry.key))
+                //Skip catalog files.
+                if (entry == null || string.IsNullOrEmpty(entry.key) || entry.key.Contains("catalog"))
                     continue;
 
                 string fileName = entry.key;
-
+                
                 // Unity built-in shaders bundle special-case
                 if (fileName.Contains("unitybuiltinshaders"))
                 {
@@ -567,7 +568,43 @@ namespace Arbelos.BuildUtility.Runtime
 
                     continue;
                 }
+                
+                // Unity monoscripts bundle special-case
+                if (fileName.Contains("monoscripts"))
+                {
+                    // Example patterns: "abcd_monoscripts.bundle" or similar
+                    string nameWithoutExt = Path.GetFileNameWithoutExtension(fileName);
+                    var parts = nameWithoutExt.Split('_');
 
+                    // Be defensive – only build id if we have at least 2 segments
+                    if (parts.Length >= 2)
+                    {
+                        // Historically you used "parts[0] + _monoscripts" as folder name
+                        string finalName = parts[0] + "_monoscripts";
+                        assetFileIds.Add(finalName);
+                    }
+
+                    continue;
+                }
+                
+                // Unity built-in assets bundle special-case
+                if (fileName.Contains("unitybuiltinassets"))
+                {
+                    // Example patterns: "abcd_monoscripts.bundle" or similar
+                    string nameWithoutExt = Path.GetFileNameWithoutExtension(fileName);
+                    var parts = nameWithoutExt.Split('_');
+
+                    // Be defensive – only build id if we have at least 2 segments
+                    if (parts.Length >= 2)
+                    {
+                        // Historically you used "parts[0] + _unitybuiltinassets" as folder name
+                        string finalName = parts[0] + "_unitybuiltinassets";
+                        assetFileIds.Add(finalName);
+                    }
+
+                    continue;
+                }
+                
                 // General case for "normal" bundles
                 // e.g. "group_something_f59db7a2af3be597e715cca63b051863.bundle"
                 // or "group_f59db7a2af3be597e715cca63b051863.bundle"
@@ -595,7 +632,7 @@ namespace Arbelos.BuildUtility.Runtime
             bool isValid = false;
 
             List<DirectoryInfo> assetFolders = FindAssetFolders(_fileIds, _cachePath);
-
+            
             if (assetFolders.Count > 0 && assetFolders.Count == _fileIds.Count)
             {
                 foreach (var folder in assetFolders)

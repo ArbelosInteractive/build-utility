@@ -208,3 +208,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - ## [1.0.48] - 2025-11-06
 ### Updated
 - Addressables Downloader - Updated LoadCustomContentCatalog() method to return IResourceLocator created during content loading 
+
+- ## [1.0.49] - 2025-12-02
+### Updated
+- Addressables Downloader - Update addressables downloader flow, skip catalog validations, and support for more custom bundle naming conventions.
