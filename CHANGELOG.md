@@ -212,3 +212,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - ## [1.0.49] - 2025-12-02
 ### Updated
 - Addressables Downloader - Update addressables downloader flow, skip catalog validations, and support for more custom bundle naming conventions.
+
+- ## [1.0.50] - 2025-12-03
+### Updated
+- Addressables Downloader - Update addressables downloader flow to keep record of FTUE Downloads and skip download repetitions.

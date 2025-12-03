@@ -262,9 +262,24 @@ namespace Arbelos.BuildUtility.Runtime
                     }
                     else
                     {
-                        Debug.Log("[Addressables Downloader] No catalog updates reported. Downloading current content for fresh install / cache fill.");
-                        // Fresh install or no updates: still download remote content.
-                        downloadDone = await DownloadAllCurrentContent();
+                        // No catalog updates.
+                        // Decide whether this is a first launch (no initial download yet) or a subsequent launch.
+                        string flagKey = GetInitialDownloadFlagKey();
+                        bool initialDownloadDoneFlag = PlayerPrefs.GetInt(flagKey, 0) == 1;
+
+                        if (!initialDownloadDoneFlag)
+                        {
+                            // First run (or cache was cleared): we need to actually download remote content.
+                            Debug.Log("[Addressables Downloader] No catalog updates reported, and no initial download recorded. Downloading current content for fresh install / cache fill.");
+                            downloadDone = await DownloadAllCurrentContent();
+                        }
+                        else
+                        {
+                            // We've already done an initial download for this profile and there are no catalog updates.
+                            // Trust Addressables' caching. No need to re-download everything again.
+                            Debug.Log("[Addressables Downloader] No catalog updates and initial download already completed. Skipping download.");
+                            downloadDone = true;
+                        }
                     }
 
                     downloadInitialized = true;
@@ -273,6 +288,12 @@ namespace Arbelos.BuildUtility.Runtime
                     if (downloadDone && ValidateCurrentlyDownloadedFiles())
                     {
                         isInitialized = true;
+
+                        // Mark that we've successfully completed the initial download for this profile.
+                        string flagKey = GetInitialDownloadFlagKey();
+                        PlayerPrefs.SetInt(flagKey, 1);
+                        PlayerPrefs.Save();
+
                         onInitialized?.Invoke();
                     }
                 }
@@ -296,6 +317,15 @@ namespace Arbelos.BuildUtility.Runtime
         #endregion
 
         #region Validation (game files only)
+        
+        private string GetInitialDownloadFlagKey()
+        {
+            string profile = (addressableData != null && !string.IsNullOrEmpty(addressableData.profileName))
+                ? addressableData.profileName
+                : "Default";
+
+            return $"ADDR_INIT_DONE_{profile}";
+        }
 
         private bool ValidateCurrentlyDownloadedFiles()
         {
