@@ -216,3 +216,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - ## [1.0.50] - 2025-12-03
 ### Updated
 - Addressables Downloader - Update addressables downloader flow to keep record of FTUE Downloads and skip download repetitions.
+
+- ## [1.0.51] - 2025-12-03
+### Updated
+- Addressables Downloader - Added Start and Complete Key Logs.

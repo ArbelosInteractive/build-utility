@@ -491,6 +491,7 @@ namespace Arbelos.BuildUtility.Runtime
                     // - We also no longer clear dependency cache per key; Addressables is
                     //   responsible for determining what actually needs downloading.
 
+                    Debug.Log($"[Addressables Downloader] Starting download for Key: {key}.");
                     AsyncOperationHandle downloadHandle = Addressables.DownloadDependenciesAsync(key);
                     await downloadHandle.Task;
 
@@ -499,6 +500,7 @@ namespace Arbelos.BuildUtility.Runtime
                         if (!pendingKeys.Remove(key))
                             Debug.Log($"[Addressables Downloader] {key} key was not removed from Pending Keys");
 
+                        Debug.Log($"[Addressables Downloader] Download Completed for Key: {key}.");
                         downloadedKeys.Add(key);
                     }
                     else
