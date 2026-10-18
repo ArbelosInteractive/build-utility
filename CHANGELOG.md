@@ -6,6 +6,14 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Released]
 
+## [1.0.52] - 2026-10-17
+### Added
+- DLC Pump release workspace with project adapter, catalog backups, asset validation, immutable manifests, full/update receipts, artifact inventories, store snapshot comparison and build-layout analysis.
+- Shared checked full-build method that returns the Addressables result.
+- DLC Pump instructions and EditMode regression tests.
+### Fixed
+- Azure uploads now fail on missing configuration or failed HTTP requests instead of reporting completion; requests are disposed and have a timeout.
+
 ## [1.0.0] - 2024-06-15
 ### Added
 - Initial release
@@ -136,7 +144,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 - ## [1.0.31] - 2025-05-12
 ### Fixed
-- Addressables Downloader - Update download coroutine handling and set result if stopped. 
+- Addressables Downloader - Update download coroutine handling and set result if stopped.
 - Remove unused function.
 
 - ## [1.0.32] - 2025-05-12
@@ -162,14 +170,14 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - ## [1.0.37] - 2025-05-23
 ### Fixed
 - Addressables Downloader - Skip size check only for built in shaders - redo them again.
-- 
+-
 - ## [1.0.38] - 2025-05-23
 ### Fixed
 - Addressables Downloader - Revert redownload invalid key logic
 
 - ## [1.0.39] - 2025-05-29
 ### Fixed
-- Addressables Downloader - Change back to async function 
+- Addressables Downloader - Change back to async function
 
 - ## [1.0.40] - 2025-05-29
 ### Fixed
@@ -181,7 +189,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 - ## [1.0.42] - 2025-06-06
 ### Updated
-- Custom Addressable Tools and Custom Build Tools scripts: added support for making incremental addressable updates. 
+- Custom Addressable Tools and Custom Build Tools scripts: added support for making incremental addressable updates.
 - Also increased the build tool window size to fit all the expanded content.
 
 - ## [1.0.43] - 2025-06-13
@@ -207,7 +215,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 - ## [1.0.48] - 2025-11-06
 ### Updated
-- Addressables Downloader - Updated LoadCustomContentCatalog() method to return IResourceLocator created during content loading 
+- Addressables Downloader - Updated LoadCustomContentCatalog() method to return IResourceLocator created during content loading
 
 - ## [1.0.49] - 2025-12-02
 ### Updated

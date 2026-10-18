@@ -15,7 +15,7 @@ namespace Arbelos.BuildUtility.Editor
         private static string containerName = "";
         private static string localBuildPath = "";
         private static ProjectData currentProjectData = null;
-        
+
         public static async Task UploadAddressables(string sharedKey)
         {
             localBuildPath = $"{Directory.GetCurrentDirectory()}/ServerData/{EditorUserBuildSettings.activeBuildTarget.ToString()}";
@@ -24,14 +24,12 @@ namespace Arbelos.BuildUtility.Editor
 
             if (currentProjectData == null)
             {
-                Debug.LogError("BUILD UTILITY - Project Data File not found. Please create a ProjectData asset in the Resources folder and assign the values.");
-                return;
+                throw new InvalidOperationException("BUILD UTILITY - Project Data File not found. Create a ProjectData asset in Resources and configure the destination.");
             }
 
             if (string.IsNullOrEmpty(currentProjectData.azureStorageAccountName) || string.IsNullOrEmpty(sharedKey) || string.IsNullOrEmpty(currentProjectData.azureStorageAccountURL))
             {
-                Debug.LogError("BUILD UTILITY - Project Data file contains null values.");
-                return;
+                throw new InvalidOperationException("BUILD UTILITY - Storage account, endpoint and upload key are required.");
             }
             string[] files = Directory.GetFiles(localBuildPath, "*", SearchOption.AllDirectories);
             foreach (string filePath in files)
@@ -46,7 +44,8 @@ namespace Arbelos.BuildUtility.Editor
 
                 Debug.Log($"Uploading {blobName} to {uploadUrl}");
 
-                UnityWebRequest request = new UnityWebRequest(uploadUrl, "PUT");
+                using UnityWebRequest request = new UnityWebRequest(uploadUrl, "PUT");
+                request.timeout = 300;
                 request.uploadHandler = new UploadHandlerRaw(fileData);
                 request.downloadHandler = new DownloadHandlerBuffer();
                 request.SetRequestHeader("x-ms-blob-type", "BlockBlob");
@@ -98,8 +97,7 @@ namespace Arbelos.BuildUtility.Editor
             }
             else
             {
-                Debug.LogError($"Error uploading file: {request.error} - Response Code: {request.responseCode}");
-                Debug.LogError($"Response: {request.downloadHandler.text}");
+                throw new IOException($"Azure upload failed: {request.error} (HTTP {request.responseCode}). Publication did not complete.");
             }
         }
     }

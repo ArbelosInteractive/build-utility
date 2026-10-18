@@ -16,6 +16,8 @@
     "precompiledReferences": [],
     "autoReferenced": true,
     "defineConstraints": [],
-    "versionDefines": [],
+    "versionDefines": [
+        { "name": "com.unity.addressables", "expression": "[2.0.0,)", "define": "ARBELOS_DLC_LAYOUT_V2" }
+    ],
     "noEngineReferences": false
 }

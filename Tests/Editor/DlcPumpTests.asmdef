@@ -1,0 +1,7 @@
+{
+  "name": "Arbelos.BuildUtility.DlcPump.Tests",
+  "references": ["Arbelos.BuildUtility.Editor"],
+  "includePlatforms": ["Editor"],
+  "optionalUnityReferences": ["TestAssemblies"],
+  "autoReferenced": false
+}

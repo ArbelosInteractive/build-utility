@@ -38,17 +38,17 @@
 
 //                 Directory.Delete(path);
 //                 Directory.CreateDirectory(path);
-                
+
 //                 Debug.Log("<color=orange>Cleared previous addressable files</color>");
 //             }
-            
+
 //             AddressableAssetSettings.BuildPlayerContent();
-            
+
 //             Debug.Log(path);
-            
+
 //             await GenerateCRCValues();
 //         }
-        
+
 //         public static async Task UpdatePreviousAddressablesBuild()
 //         {
 //             // Deletes Old Addressables
@@ -69,10 +69,10 @@
 
 //                 Directory.Delete(path);
 //                 Directory.CreateDirectory(path);
-                
+
 //                 Debug.Log("<color=orange>Cleared previous addressable files</color>");
 //             }
-            
+
 //             var contentStatePath = ContentUpdateScript.GetContentStateDataPath(false);
 //             if (!string.IsNullOrEmpty(contentStatePath))
 //             {
@@ -90,7 +90,7 @@
 //                 AddressableAssetSettings.BuildPlayerContent();
 //                 Debug.Log("<color=orange>No existing state found to update - finish clean addressables build</color>");
 //             }
-            
+
 //             Application.logMessageReceived -= HandleAddressableUpdateErrors;
 
 //             await GenerateCRCValues();
@@ -147,25 +147,25 @@
 //             }
 
 //         }
-        
+
 //         public static void SwitchCurrentAddressablesProfileByName(string profileName)
 //        {
 //            AddressableAssetSettings assetSettings;
 //            AddressableAssetProfileSettings assetProfileSettings;
-           
+
 //            //Initialize asset settings and asset profile settings
 //            assetSettings = AddressableAssetSettingsDefaultObject.Settings;
 //            assetProfileSettings = assetSettings.profileSettings;
-           
+
 //            //First Validate if the given named addressable profile exists or not
 //            if (!assetProfileSettings.GetAllProfileNames().Contains(profileName))
 //            {
 //                throw new Exception($"No Addressable Profile exists that goes by name: {profileName}. Please enter the correct name.");
 //            }
-           
+
 //            assetSettings.activeProfileId = assetProfileSettings.GetProfileId(profileName);
 //            assetSettings.SetDirty(AddressableAssetSettings.ModificationEvent.ActiveProfileSet, null, true, true);
-           
+
 //             //Update profile info in game asset file as well.
 //            GameAddressableData profileData = Resources.Load<GameAddressableData>("GameAddressableData");
 //            profileData.profileName = profileName;
@@ -174,7 +174,7 @@
 //            AssetDatabase.Refresh();
 //            Debug.Log("<color=orange>Finished Saving Addressable Game Data file with updated profile info</color>");
 //        }
-        
+
 //         public static async Task CloudBuild_GenerateCRCValues(string addressablesBuildPath = null)
 //         {
 //             if (addressablesBuildPath == null)
@@ -205,25 +205,25 @@
 //                 Debug.Log($"<color=orange>No addressable build path found: {addressablesBuildPath}</color>");
 //             }
 //         }
-        
+
 //         public static void CloudBuild_SwitchAddressablesProfileByName(string profileName)
 //         {
 //             AddressableAssetSettings assetSettings;
 //             AddressableAssetProfileSettings assetProfileSettings;
-           
+
 //             //Initialize asset settings and asset profile settings
 //             assetSettings = AddressableAssetSettingsDefaultObject.Settings;
 //             assetProfileSettings = assetSettings.profileSettings;
-           
+
 //             //First Validate if the given named addressable profile exists or not
 //             if (!assetProfileSettings.GetAllProfileNames().Contains(profileName))
 //             {
 //                 throw new Exception($"No Addressable Profile exists that goes by name: {profileName}. Please enter the correct name.");
 //             }
-           
+
 //             assetSettings.activeProfileId = assetProfileSettings.GetProfileId(profileName);
 //             assetSettings.SetDirty(AddressableAssetSettings.ModificationEvent.ActiveProfileSet, null, true, true);
-           
+
 //             //Update profile info in game asset file as well.
 //             GameAddressableData profileData = (GameAddressableData)AssetDatabase.LoadAssetAtPath("Assets/Resources/GameAddressableData.asset", typeof(GameAddressableData));
 //             profileData.profileName = profileName;
@@ -252,13 +252,13 @@
 
 //                 Directory.Delete(addressablesBuildPath);
 //                 Directory.CreateDirectory(addressablesBuildPath);
-                
+
 //                 Debug.Log("<color=orange>Cleared previous addressable files</color>");
-                
+
 //                 AddressableAssetSettings.BuildPlayerContent();
-            
+
 //                 Debug.Log(addressablesBuildPath);
-            
+
 //                 await CloudBuild_GenerateCRCValues(addressablesBuildPath);
 //             }
 //         }
@@ -282,9 +282,9 @@
 
 //                 Directory.Delete(addressablesBuildPath);
 //                 Directory.CreateDirectory(addressablesBuildPath);
-                
+
 //                 Debug.Log("<color=orange>Cleared previous addressable files</color>");
-                
+
 //                 var contentStatePath = ContentUpdateScript.GetContentStateDataPath(false);
 //                 if (!string.IsNullOrEmpty(contentStatePath))
 //                 {
@@ -302,7 +302,7 @@
 //                     AddressableAssetSettings.BuildPlayerContent();
 //                     Debug.Log("<color=orange>No existing state found to update - finish clean addressables build</color>");
 //                 }
-            
+
 //                 Application.logMessageReceived -= CloudBuild_HandleAddressableUpdateErrors;
 
 //                 await CloudBuild_GenerateCRCValues(addressablesBuildPath);
@@ -348,9 +348,15 @@ namespace Arbelos.BuildUtility.Editor
 
         public static void BuildPlayerContentOrThrow()
         {
+            BuildPlayerContentWithResult();
+        }
+
+        public static AddressablesPlayerBuildResult BuildPlayerContentWithResult()
+        {
             AddressablesPlayerBuildResult result;
             AddressableAssetSettings.BuildPlayerContent(out result);
             ValidateBuildResult(result);
+            return result;
         }
 
         private static void ValidateBuildResult(AddressablesPlayerBuildResult result)
