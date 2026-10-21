@@ -7,6 +7,7 @@ using UnityEngine;
 public sealed class DlcRelease : ScriptableObject
 {
     public DlcPublishingSettings publishingSettings;
+    public DlcStoreExportSettings storeExportSettings;
     public string releaseId = "new-release";
     public string minimumClientVersion = "";
     public BuildTarget target = BuildTarget.Android;

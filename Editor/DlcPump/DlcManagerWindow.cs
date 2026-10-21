@@ -219,6 +219,7 @@ public sealed class DlcManagerWindow : EditorWindow
 
     void DrawStores()
     {
+        DrawStoreCatalogExport();
         EditorGUILayout.HelpBox("Export requirements for PlayFab and the platform stores. Compare with a normalized snapshot exported from the intended environment. This does not publish listings or certify live purchase/restore tests.", MessageType.Info);
         if (GUILayout.Button("Export store-registration requirements"))
         {
@@ -233,6 +234,78 @@ public sealed class DlcManagerWindow : EditorWindow
                 DlcStoreReadiness.Requirements(DlcReleaseService.Snapshot(release)), JObject.Parse(File.ReadAllText(path)));
         }
         EditorGUILayout.TextArea(report, GUILayout.MinHeight(220));
+    }
+
+    JObject SelectedStoreProducts()
+    {
+        var products = (JArray)DlcReleaseService.Catalog()["products"];
+        if (products == null) throw new InvalidOperationException("IAP catalog has no products.");
+        var selected = new JArray();
+        foreach (string id in release.productIds)
+        {
+            var found = products.Where(p => (string)p["id"] == id).ToArray();
+            if (found.Length != 1) throw new InvalidOperationException("Catalog product must resolve uniquely: " + id);
+            selected.Add(found[0].DeepClone());
+        }
+        return new JObject { ["releaseId"] = release.releaseId, ["products"] = selected };
+    }
+
+    void DrawStoreCatalogExport()
+    {
+        EditorGUILayout.LabelField("Platform API catalog exports", EditorStyles.boldLabel);
+        EditorGUILayout.HelpBox("Export JSON for PlayFab Economy v2, Apple App Store Connect and Google Play. Required inputs must be complete. Apple response IDs are resolved manually in the documented request sequence. Exporting requires no content build and sends no API requests.", MessageType.Info);
+        var serialized = new SerializedObject(release);
+        serialized.Update();
+        EditorGUILayout.PropertyField(serialized.FindProperty("storeExportSettings"));
+        serialized.ApplyModifiedProperties();
+        if (!release.storeExportSettings)
+        {
+            if (GUILayout.Button("Create store export settings"))
+            {
+                string path = EditorUtility.SaveFilePanelInProject("Store export settings", "DLC Store Export Settings", "asset", "Save in an Editor folder.");
+                if (!string.IsNullOrEmpty(path))
+                {
+                    if (path.Split('/').Contains("Resources")) throw new InvalidOperationException("Store export settings must be outside Resources.");
+                    var settings = CreateInstance<DlcStoreExportSettings>();
+                    AssetDatabase.CreateAsset(settings, path);
+                    Undo.RecordObject(release, "Assign store export settings");
+                    release.storeExportSettings = settings;
+                    EditorUtility.SetDirty(release);
+                }
+            }
+            return;
+        }
+        var settingsObject = new SerializedObject(release.storeExportSettings);
+        settingsObject.Update();
+        EditorGUILayout.PropertyField(settingsObject.FindProperty("options"), true);
+        settingsObject.ApplyModifiedProperties();
+        if (GUILayout.Button("Add missing selected products to export settings"))
+        {
+            Undo.RecordObject(release.storeExportSettings, "Add store export products");
+            DlcStoreCatalogExport.AddMissingProducts(SelectedStoreProducts(), release.storeExportSettings.options);
+            EditorUtility.SetDirty(release.storeExportSettings);
+            report = "Added missing selected products without replacing existing settings. Fill locales, prices, territories and application IDs.";
+        }
+        if (GUILayout.Button("Validate platform catalog export"))
+        {
+            var errors = DlcStoreCatalogExport.Validate(SelectedStoreProducts(), release.storeExportSettings.options);
+            report = errors.Count == 0 ? "PASS: Required export inputs are complete. Apple response bindings are resolved during manual submission." : string.Join("\n", errors);
+        }
+        if (GUILayout.Button("Export platform catalogs (JSON)"))
+        {
+            var manifest = SelectedStoreProducts();
+            var errors = DlcStoreCatalogExport.Validate(manifest, release.storeExportSettings.options);
+            if (errors.Count > 0) { report = "Export blocked:\n" + string.Join("\n", errors); return; }
+            string parent = EditorUtility.OpenFolderPanel("Choose parent for a new store export folder", "", "");
+            if (!string.IsNullOrEmpty(parent))
+            {
+                AssetDatabase.SaveAssets();
+                string output = DlcStoreCatalogExport.Export(manifest, release.storeExportSettings.options, parent);
+                report = "Exported platform request bodies, ordered requests, validation report and instructions to " + output;
+                EditorUtility.RevealInFinder(output);
+            }
+        }
+        EditorGUILayout.Space();
     }
 
     void DrawBuild()

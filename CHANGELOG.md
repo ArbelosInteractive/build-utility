@@ -6,6 +6,12 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Released]
 
+## [1.0.53] - 2026-10-21
+### Added
+- DLC Pump Stores-tab export settings and validated JSON payloads for PlayFab Economy v2 drafts, Apple non-consumable products/localizations/pricing/availability, and Google Play one-time product batches of up to 100.
+- Ordered API request manifest, Apple response/price-point bindings, validation report and manual submission instructions. No API calls or credentials are required to export.
+- Regression coverage for required inputs, store ID overrides, duplicate IDs/locales, pricing precision, batch splitting, Apple dependencies and immutable export directories.
+
 ## [1.0.52] - 2026-10-17
 ### Added
 - DLC Pump release workspace with project adapter, catalog backups, asset validation, immutable manifests, full/update receipts, artifact inventories, store snapshot comparison and build-layout analysis.
