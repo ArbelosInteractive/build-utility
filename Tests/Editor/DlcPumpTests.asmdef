@@ -1,6 +1,8 @@
 {
   "name": "Arbelos.BuildUtility.DlcPump.Tests",
   "references": ["Arbelos.BuildUtility.Editor"],
+  "overrideReferences": true,
+  "precompiledReferences": ["Newtonsoft.Json.dll", "nunit.framework.dll"],
   "includePlatforms": ["Editor"],
   "optionalUnityReferences": ["TestAssemblies"],
   "autoReferenced": false
