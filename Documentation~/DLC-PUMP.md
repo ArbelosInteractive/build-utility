@@ -30,7 +30,7 @@ Export registration requirements, then compare a normalized store/backend snapsh
 
 ### Export platform API catalogs
 
-In **Stores**, create or assign **Store Export Settings** outside Resources. Enable the desired platforms, then click **Add missing selected products to export settings**. This copies product reference names, text and payout subtypes without changing existing settings. It does not guess locales, prices or currencies. Only the release's selected non-consumable products are exported; a content build is not required.
+In **Stores**, create or assign **Store Export Settings** outside Resources. Enable the desired platforms, then click **Add missing selected products to export settings**. This copies product reference names, text and payout subtypes without changing existing settings. It does not guess locales, prices or currencies. Validation and export use **every product in the export settings list**, independently of the selected release's product selection. The selected release only seeds new settings entries and supplies the release ID. Add products from other releases to the same settings asset to export them together. Removing a settings entry excludes that product. Each configured ID must resolve uniquely in the Unity IAP catalog; missing or incomplete entries block export. Only non-consumable products are supported; a content build is not required.
 
 Complete the fields for each enabled platform:
 

@@ -32,6 +32,47 @@ public class DlcStoreCatalogExportTests
     }
 
     [Test]
+    public void ExportIncludesEverySettingsProductOutsideTheReleaseSelection()
+    {
+        var catalog = Manifest(3);
+        var options = Options(catalog);
+        var releaseOnly = Manifest(1);
+        var manifest = DlcStoreCatalogExport.ConfiguredProducts(catalog, options, (string)releaseOnly["releaseId"]);
+        var files = DlcStoreCatalogExport.Build(manifest, options);
+        Assert.AreEqual(1, ((JArray)releaseOnly["products"]).Count);
+        Assert.AreEqual(3, ((JArray)manifest["products"]).Count);
+        Assert.AreEqual(3, ((JArray)JObject.Parse(files["google/0001-batch.json"])["requests"]).Count);
+        Assert.IsTrue(files.ContainsKey("playfab/0003-create.json"));
+        Assert.IsTrue(files.ContainsKey("apple/0003/01-create.json"));
+    }
+
+    [Test]
+    public void ExportSettingsSelectOnlyConfiguredCatalogProductsAndValidateThemAll()
+    {
+        var catalog = Manifest(3); var options = Options(catalog);
+        options.products.RemoveAt(0);
+        var manifest = DlcStoreCatalogExport.ConfiguredProducts(catalog, options, "release");
+        CollectionAssert.AreEqual(new[] { "pack_1", "pack_2" }, ((JArray)manifest["products"]).Select(p => (string)p["id"]).ToArray());
+        options.products[1].appleBasePrice = "";
+        Assert.Throws<InvalidOperationException>(() => DlcStoreCatalogExport.Build(manifest, options));
+        Assert.AreEqual(3, ((JArray)catalog["products"]).Count);
+    }
+
+    [Test]
+    public void UnknownOrDuplicateSettingsProductsCannotBeSilentlyOmitted()
+    {
+        var catalog = Manifest(); var options = Options(catalog);
+        options.products[0].productId = "unknown";
+        Assert.Throws<InvalidOperationException>(() => DlcStoreCatalogExport.ConfiguredProducts(catalog, options, "release"));
+        options.products[0].productId = "pack_0";
+        options.products.Add(options.products[0]);
+        var manifest = DlcStoreCatalogExport.ConfiguredProducts(catalog, options, "release");
+        Assert.Throws<InvalidOperationException>(() => DlcStoreCatalogExport.Build(manifest, options));
+        options.products.Clear();
+        Assert.Throws<InvalidOperationException>(() => DlcStoreCatalogExport.Build(DlcStoreCatalogExport.ConfiguredProducts(catalog, options, "release"), options));
+    }
+
+    [Test]
     public void ExportsPlatformIdsWithoutChangingPlayFabFriendlyIdOrCatalog()
     {
         var m = Manifest(); var o = Options(m);

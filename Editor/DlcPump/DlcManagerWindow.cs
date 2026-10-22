@@ -253,7 +253,7 @@ public sealed class DlcManagerWindow : EditorWindow
     void DrawStoreCatalogExport()
     {
         EditorGUILayout.LabelField("Platform API catalog exports", EditorStyles.boldLabel);
-        EditorGUILayout.HelpBox("Export JSON for PlayFab Economy v2, Apple App Store Connect and Google Play. Required inputs must be complete. Apple response IDs are resolved manually in the documented request sequence. Exporting requires no content build and sends no API requests.", MessageType.Info);
+        EditorGUILayout.HelpBox("Export JSON for every product listed in these export settings, independently of the release's product selection. Required inputs must be complete for all configured products. Apple response IDs are resolved manually in the documented request sequence. Exporting requires no content build and sends no API requests.", MessageType.Info);
         var serialized = new SerializedObject(release);
         serialized.Update();
         EditorGUILayout.PropertyField(serialized.FindProperty("storeExportSettings"));
@@ -279,6 +279,7 @@ public sealed class DlcManagerWindow : EditorWindow
         settingsObject.Update();
         EditorGUILayout.PropertyField(settingsObject.FindProperty("options"), true);
         settingsObject.ApplyModifiedProperties();
+        EditorGUILayout.LabelField("Export scope", "All " + (release.storeExportSettings.options?.products?.Count ?? 0) + " products in export settings");
         if (GUILayout.Button("Add missing selected products to export settings"))
         {
             Undo.RecordObject(release.storeExportSettings, "Add store export products");
@@ -288,12 +289,13 @@ public sealed class DlcManagerWindow : EditorWindow
         }
         if (GUILayout.Button("Validate platform catalog export"))
         {
-            var errors = DlcStoreCatalogExport.Validate(SelectedStoreProducts(), release.storeExportSettings.options);
+            var manifest = DlcStoreCatalogExport.ConfiguredProducts(DlcReleaseService.Catalog(), release.storeExportSettings.options, release.releaseId);
+            var errors = DlcStoreCatalogExport.Validate(manifest, release.storeExportSettings.options);
             report = errors.Count == 0 ? "PASS: Required export inputs are complete. Apple response bindings are resolved during manual submission." : string.Join("\n", errors);
         }
         if (GUILayout.Button("Export platform catalogs (JSON)"))
         {
-            var manifest = SelectedStoreProducts();
+            var manifest = DlcStoreCatalogExport.ConfiguredProducts(DlcReleaseService.Catalog(), release.storeExportSettings.options, release.releaseId);
             var errors = DlcStoreCatalogExport.Validate(manifest, release.storeExportSettings.options);
             if (errors.Count > 0) { report = "Export blocked:\n" + string.Join("\n", errors); return; }
             string parent = EditorUtility.OpenFolderPanel("Choose parent for a new store export folder", "", "");
@@ -301,7 +303,7 @@ public sealed class DlcManagerWindow : EditorWindow
             {
                 AssetDatabase.SaveAssets();
                 string output = DlcStoreCatalogExport.Export(manifest, release.storeExportSettings.options, parent);
-                report = "Exported platform request bodies, ordered requests, validation report and instructions to " + output;
+                report = "Exported all " + ((JArray)manifest["products"]).Count + " configured products, ordered requests, validation report and instructions to " + output;
                 EditorUtility.RevealInFinder(output);
             }
         }

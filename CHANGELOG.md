@@ -6,6 +6,11 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Released]
 
+## [1.0.54] - 2026-10-22
+### Fixed
+- Platform catalog validation and export now include every product listed in Store Export Settings, independently of the selected release's products. The release selection only seeds the settings list.
+- Unknown, duplicate, empty or incomplete configured products block export instead of being silently omitted. The Stores tab shows the configured export count.
+
 ## [1.0.53] - 2026-10-21
 ### Added
 - DLC Pump Stores-tab export settings and validated JSON payloads for PlayFab Economy v2 drafts, Apple non-consumable products/localizations/pricing/availability, and Google Play one-time product batches of up to 100.

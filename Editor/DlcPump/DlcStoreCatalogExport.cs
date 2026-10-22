@@ -14,6 +14,23 @@ public static class DlcStoreCatalogExport
     const string Google = "https://androidpublisher.googleapis.com/androidpublisher/v3/applications/";
     const string LocalePattern = @"^[a-z]{2,3}(-[A-Za-z0-9]{2,8})*$";
 
+    public static JObject ConfiguredProducts(JObject catalog, DlcStoreExportOptions options, string releaseId)
+    {
+        if (options?.products == null) throw new InvalidOperationException("Product export settings are required.");
+        var products = Products(catalog).ToArray();
+        var configured = new JArray();
+        foreach (var setting in options.products)
+        {
+            if (setting == null || string.IsNullOrWhiteSpace(setting.productId))
+                throw new InvalidOperationException("Every export settings product must have a product ID.");
+            var matches = products.Where(p => (string)p["id"] == setting.productId).ToArray();
+            if (matches.Length != 1)
+                throw new InvalidOperationException("Export settings product must resolve uniquely in the IAP catalog: " + setting.productId);
+            configured.Add(matches[0].DeepClone());
+        }
+        return new JObject { ["releaseId"] = releaseId, ["products"] = configured };
+    }
+
     public static void AddMissingProducts(JObject manifest, DlcStoreExportOptions options)
     {
         foreach (var p in Products(manifest))
