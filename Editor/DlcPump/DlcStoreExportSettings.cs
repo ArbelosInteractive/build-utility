@@ -30,6 +30,9 @@ public sealed class DlcStoreExportProduct
     public string productId = "";
     public string playFabContentType = "";
     public string appleReferenceName = "";
+    [DlcReviewScreenshotPath]
+    [Tooltip("Required for Apple exports. PNG/JPEG file path, absolute or relative to the Unity project. The export copies this image into its product folder.")]
+    public string appleReviewScreenshotPath = "";
     [Tooltip("Base-territory customer price. Decimal with a dot; never inferred from an old Apple price tier.")]
     public string appleBasePrice = "";
     public string appleBaseCurrency = "";
@@ -57,3 +60,5 @@ public sealed class DlcStoreExportRegion
     [Tooltip("Customer price in this region's currency, with a dot decimal separator (up to nine decimal places).")]
     public string price = "";
 }
+
+public sealed class DlcReviewScreenshotPathAttribute : PropertyAttribute { }

@@ -6,6 +6,24 @@ using NUnit.Framework;
 
 public class DlcStoreCatalogExportTests
 {
+    static string screenshotFixture;
+    static string ReviewScreenshotFixture()
+    {
+        if (screenshotFixture == null)
+        {
+            screenshotFixture = Path.Combine(Path.GetTempPath(), "dlcpump-review-fixture-" + Guid.NewGuid().ToString("N") + ".png");
+            File.WriteAllBytes(screenshotFixture, Convert.FromBase64String("iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC1HAwCAAAAC0lEQVR42mP8/x8AAwMCAO+a4X8AAAAASUVORK5CYII="));
+        }
+        return screenshotFixture;
+    }
+
+    [OneTimeTearDown]
+    public void CleanupScreenshotFixture()
+    {
+        if (screenshotFixture != null && File.Exists(screenshotFixture)) File.Delete(screenshotFixture);
+        screenshotFixture = null;
+    }
+
     public static JObject Manifest(int count = 1)
     {
         return new JObject { ["releaseId"] = "test-release", ["products"] = new JArray(Enumerable.Range(0, count).Select(i => new JObject {
@@ -23,12 +41,76 @@ public class DlcStoreCatalogExportTests
         foreach (var p in o.products)
         {
             p.appleBasePrice = "1.99"; p.appleBaseCurrency = "USD";
+            p.appleReviewScreenshotPath = ReviewScreenshotFixture();
             p.localizations[0].appleLocale = "en-US";
             p.localizations[0].googleLanguageCode = "en-US";
             p.localizations[0].playFabLocale = "en-US";
             p.googleRegions.Add(new DlcStoreExportRegion { regionCode = "US", currencyCode = "USD", price = "1.990000001" });
         }
         return o;
+    }
+
+    [Test]
+    public void AppleScreenshotIsRequiredButDisabledAppleDoesNotRequireIt()
+    {
+        var m = Manifest(); var o = Options(m);
+        o.products[0].appleReviewScreenshotPath = "";
+        Assert.IsTrue(DlcStoreCatalogExport.Validate(m, o).Any(e => e.Contains("Apple review screenshot")));
+        Assert.Throws<InvalidOperationException>(() => DlcStoreCatalogExport.Build(m, o));
+        o.apple = false;
+        Assert.IsEmpty(DlcStoreCatalogExport.Validate(m, o));
+    }
+
+    [Test]
+    public void MissingOrInvalidScreenshotFilesBlockExport()
+    {
+        var m = Manifest(); var o = Options(m);
+        string parent = Path.Combine(Path.GetTempPath(), "dlcpump-image-no-write-" + Guid.NewGuid().ToString("N"));
+        o.products[0].appleReviewScreenshotPath = parent + ".png";
+        Assert.Throws<InvalidOperationException>(() => DlcStoreCatalogExport.Export(m, o, parent));
+        Assert.IsFalse(Directory.Exists(parent));
+        string invalid = Path.Combine(Path.GetTempPath(), "dlcpump-invalid-" + Guid.NewGuid().ToString("N") + ".png");
+        try
+        {
+            File.WriteAllText(invalid, "not an image");
+            o.products[0].appleReviewScreenshotPath = invalid;
+            Assert.IsTrue(DlcStoreCatalogExport.Validate(m, o).Any(e => e.Contains("image signature")));
+            Assert.Throws<InvalidOperationException>(() => DlcStoreCatalogExport.Export(m, o, parent));
+            Assert.IsFalse(Directory.Exists(parent));
+        }
+        finally { File.Delete(invalid); }
+    }
+
+    [Test]
+    public void AppleScreenshotIsPackagedWithReservationUploadCommitAndVerification()
+    {
+        var m = Manifest(2); var o = Options(m);
+        string parent = Path.Combine(Path.GetTempPath(), "dlcpump-images-" + Guid.NewGuid().ToString("N"));
+        try
+        {
+            string directory = DlcStoreCatalogExport.Export(m, o, parent);
+            var requests = (JArray)JObject.Parse(File.ReadAllText(Path.Combine(directory, "requests.json")))["requests"];
+            for (int i = 1; i <= 2; i++)
+            {
+                string key = i.ToString("D4");
+                string image = "apple/" + key + "/review-screenshot.png";
+                var original = File.ReadAllBytes(o.products[i - 1].appleReviewScreenshotPath);
+                CollectionAssert.AreEqual(original, File.ReadAllBytes(Path.Combine(directory, image)));
+                var reserve = JObject.Parse(File.ReadAllText(Path.Combine(directory, "apple/" + key + "/05-screenshot-reserve.json")));
+                Assert.AreEqual(original.LongLength, (long)reserve["data"]["attributes"]["fileSize"]);
+                Assert.AreEqual("review-screenshot.png", (string)reserve["data"]["attributes"]["fileName"]);
+                var upload = requests.Single(r => (string)r["id"] == "apple-" + key + "-screenshot-upload");
+                Assert.AreEqual(image, (string)upload["file"]);
+                var commit = JObject.Parse(File.ReadAllText(Path.Combine(directory, "apple/" + key + "/06-screenshot-commit.json")));
+                Assert.IsTrue((bool)commit["data"]["attributes"]["uploaded"]);
+                string checksum;
+                using (var md5 = System.Security.Cryptography.MD5.Create()) checksum = BitConverter.ToString(md5.ComputeHash(original)).Replace("-", "").ToLowerInvariant();
+                Assert.AreEqual(checksum, (string)commit["data"]["attributes"]["sourceFileChecksum"]);
+                Assert.AreEqual("{{apple-" + key + "-screenshot-reserve.data.id}}", (string)commit["data"]["id"]);
+                Assert.IsTrue(requests.Any(r => (string)r["id"] == "apple-" + key + "-screenshot-verify"));
+            }
+        }
+        finally { if (Directory.Exists(parent)) Directory.Delete(parent, true); }
     }
 
     [Test]
@@ -228,12 +310,17 @@ public class DlcStoreExportSerializationTests
             var options = loaded.storeExportSettings.options;
             Assert.AreEqual("1.990000001", options.products[0].googleRegions[0].price);
             Assert.AreEqual("en-US", options.products[0].localizations[0].appleLocale);
+            Assert.IsTrue(File.Exists(options.products[0].appleReviewScreenshotPath));
             Assert.IsEmpty(DlcStoreCatalogExport.Validate(DlcStoreCatalogExportTests.Manifest(), options));
             var serialized = new UnityEditor.SerializedObject(loaded);
             Assert.IsNotNull(serialized.FindProperty("storeExportSettings"));
             var serializedSettings = new UnityEditor.SerializedObject(loaded.storeExportSettings);
             Assert.IsNotNull(serializedSettings.FindProperty("options"));
         }
-        finally { UnityEditor.AssetDatabase.DeleteAsset(folder); }
+        finally
+        {
+            UnityEditor.AssetDatabase.DeleteAsset(folder);
+            new DlcStoreCatalogExportTests().CleanupScreenshotFixture();
+        }
     }
 }

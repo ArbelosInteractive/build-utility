@@ -6,6 +6,11 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Released]
 
+## [1.0.55] - 2026-10-22
+### Added
+- Per-product Apple review screenshot path with a PNG/JPEG file picker. Apple export requires readable screenshot files and copies each image into its product export folder.
+- Apple screenshot upload reservation and MD5 completion payloads, response-driven binary upload instructions and processing verification in the request manifest. Submission remains manual.
+
 ## [1.0.54] - 2026-10-22
 ### Fixed
 - Platform catalog validation and export now include every product listed in Store Export Settings, independently of the selected release's products. The release selection only seeds the settings list.
