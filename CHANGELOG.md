@@ -6,6 +6,12 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Released]
 
+## [1.0.56] - 2026-10-25
+### Added
+- Per-product Apple 00-pricepoint.json with the configured base territory and customer price, linked from the price-point lookup request.
+### Changed
+- Exported Apple review screenshots are resized to 1179 x 2556 portrait PNGs, preserving the whole image with black padding and leaving source files unchanged. Upload sizes and checksums use the resized bytes.
+
 ## [1.0.55] - 2026-10-22
 ### Added
 - Per-product Apple review screenshot path with a PNG/JPEG file picker. Apple export requires readable screenshot files and copies each image into its product export folder.

@@ -8,7 +8,7 @@ using System.Text;
 using System.Text.RegularExpressions;
 using Newtonsoft.Json.Linq;
 
-// Pure mapping and validation. No credentials, HTTP calls or Unity asset changes.
+// Catalog mapping and validation. No credentials, HTTP calls or Unity asset changes.
 public static class DlcStoreCatalogExport
 {
     const string Apple = "https://api.appstoreconnect.apple.com";
@@ -135,13 +135,18 @@ public static class DlcStoreCatalogExport
     }
 
     public static Dictionary<string, string> Build(JObject manifest, DlcStoreExportOptions o)
-        => BuildPackage(manifest, o, out _);
+        => Build(manifest, o, DlcAppleScreenshot.Prepare);
 
-    static Dictionary<string, string> BuildPackage(JObject manifest, DlcStoreExportOptions o, out Dictionary<string, byte[]> screenshots)
+    // Explicit processor overload keeps mapping/file tests independent of Unity's native image codec.
+    public static Dictionary<string, string> Build(JObject manifest, DlcStoreExportOptions o, Func<byte[], byte[]> prepareAppleScreenshot)
+        => BuildPackage(manifest, o, prepareAppleScreenshot, out _);
+
+    static Dictionary<string, string> BuildPackage(JObject manifest, DlcStoreExportOptions o, Func<byte[], byte[]> prepareAppleScreenshot, out Dictionary<string, byte[]> screenshots)
     {
         var errors = Validate(manifest, o);
         if (errors.Count > 0) throw new InvalidOperationException(string.Join("\n", errors));
         screenshots = new Dictionary<string, byte[]>(StringComparer.Ordinal);
+        var preparedImages = new Dictionary<string, byte[]>(StringComparer.Ordinal);
         var files = new Dictionary<string, string>(StringComparer.Ordinal);
         var requests = new JArray();
         var googleRequests = new List<JObject>();
@@ -164,8 +169,15 @@ public static class DlcStoreCatalogExport
             }
             if (o.apple)
             {
-                // Use one captured byte array for reservation size, checksum and exported image.
-                var bytes = ReadScreenshot(c.appleReviewScreenshotPath);
+                // Resize each source once, then use the final bytes for size, checksum and exported image.
+                string sourcePath = Path.GetFullPath(c.appleReviewScreenshotPath);
+                if (!preparedImages.TryGetValue(sourcePath, out var bytes))
+                {
+                    if (prepareAppleScreenshot == null) throw new ArgumentNullException(nameof(prepareAppleScreenshot));
+                    bytes = prepareAppleScreenshot(ReadScreenshot(sourcePath));
+                    if (bytes == null) throw new InvalidOperationException("Apple screenshot processing returned no image.");
+                    preparedImages.Add(sourcePath, bytes);
+                }
                 string image = "apple/" + key + "/review-screenshot" + ScreenshotExtension(bytes);
                 screenshots.Add(image, bytes);
                 BuildApple(files, requests, p, c, o, key, image, bytes);
@@ -202,6 +214,7 @@ public static class DlcStoreCatalogExport
     {
         string id = (string)p["id"], create = "apple-" + key + "-create", item = "{{" + create + ".data.id}}";
         string folder = "apple/" + key + "/";
+        files.Add(folder + "00-pricepoint.json", new JObject { ["territory"] = o.appleBaseTerritory, ["customerPrice"] = c.appleBasePrice }.ToString());
         Add(files, requests, create, "Apple", "POST", Apple + "/v2/inAppPurchases", folder + "01-create.json",
             Resource("inAppPurchases", new JObject { ["name"] = c.appleReferenceName, ["productId"] = StoreId(p, "AppleAppStore"),
                 ["inAppPurchaseType"] = "NON_CONSUMABLE", ["familySharable"] = c.appleFamilySharable },
@@ -218,6 +231,7 @@ public static class DlcStoreCatalogExport
         read["select"] = new JObject { ["responseCollection"] = "data", ["attribute"] = "customerPrice", ["equalsDecimal"] = c.appleBasePrice,
             ["currency"] = c.appleBaseCurrency, ["territory"] = o.appleBaseTerritory, ["bindAs"] = lookup + ".selected.id",
             ["instructions"] = "Follow links.next until the exact price is found. Verify territory currency separately. Bind the matching data[].id; stop if no exact price exists." };
+        read["selectionFile"] = folder + "00-pricepoint.json";
         var price = Resource("inAppPurchasePriceSchedules", null, new JObject { ["inAppPurchase"] = Relation("inAppPurchases", item),
             ["baseTerritory"] = Relation("territories", o.appleBaseTerritory),
             ["manualPrices"] = new JObject { ["data"] = new JArray(Identity("inAppPurchasePrices", "${price1}")) } });
@@ -254,9 +268,12 @@ public static class DlcStoreCatalogExport
     }
 
     public static string Export(JObject manifest, DlcStoreExportOptions options, string parentDirectory)
+        => Export(manifest, options, parentDirectory, DlcAppleScreenshot.Prepare);
+
+    public static string Export(JObject manifest, DlcStoreExportOptions options, string parentDirectory, Func<byte[], byte[]> prepareAppleScreenshot)
     {
         // Complete validation and serialization before touching the destination.
-        var files = BuildPackage(manifest, options, out var screenshots);
+        var files = BuildPackage(manifest, options, prepareAppleScreenshot, out var screenshots);
         string directory = Path.Combine(Path.GetFullPath(parentDirectory), "dlc-store-export-" + DateTime.UtcNow.ToString("yyyyMMddTHHmmssfffZ") + "-" + Guid.NewGuid().ToString("N"));
         Directory.CreateDirectory(directory);
         foreach (var file in files)
@@ -359,9 +376,11 @@ Use Authorization: Bearer with your App Store Connect JWT. Follow requests.json 
 
 GET the exported pricePoints URL, following links.next until the exact configured customer price is found in the base territory. Confirm the territory's currency (GET /v1/territories/{territory}). Bind the matching data[].id as {{apple-NNNN-pricepoints.selected.id}}. If no exact price exists, stop and correct settings before exporting again. The price point is product-specific and cannot be calculated from the legacy Unity applePriceTier.
 
+Each Apple product folder contains 00-pricepoint.json with territory from Apple Base Territory and customerPrice from that product's Apple Base Price (preserved as a decimal string). This is local lookup metadata linked from the pricePoints request's selectionFile; it is not a request to create an Apple price point.
+
 Then send localization, price schedule, and availability requests. Resolve all {{...}} response bindings before sending; these are response dependencies, not missing input fields. Keep Apple's inline ${price1} identifier unchanged. Apple automatically equalizes prices outside the base territory; review those prices in App Store Connect. Available territories are explicit; expansion is controlled by the exported flag. These are create requests: inspect existing products and do not blindly replay them. Tax/compliance setup, submission and approval remain manual.
 
-Each Apple product includes its configured review screenshot copied into its own folder. POST 05-screenshot-reserve.json, substitute the returned screenshot data.id in the commit JSON and URL, and follow the upload-returned-parts operation in requests.json. Upload every specified byte range using the returned method, URL and requestHeaders, then PATCH 06-screenshot-commit.json. Its MD5 checksum and file size describe the packaged image; do not modify it. Poll the screenshot GET request until assetDeliveryState.state is COMPLETE, inspecting FAILED errors rather than submitting. Alternatively upload the packaged image manually under the product's App Review Information in App Store Connect. Local validation checks file readability and PNG/JPEG signatures; Apple still validates dimensions and review suitability. No screenshot is uploaded automatically.
+Each Apple product includes its configured review screenshot resized to 1179 x 2556 portrait pixels as an opaque PNG in its own folder. The entire image is preserved with centered black padding where the aspect ratio differs; the source file is unchanged. POST 05-screenshot-reserve.json, substitute the returned screenshot data.id in the commit JSON and URL, and follow the upload-returned-parts operation in requests.json. Upload every specified byte range using the returned method, URL and requestHeaders, then PATCH 06-screenshot-commit.json. Its MD5 checksum and file size describe the packaged image; do not modify it. Poll the screenshot GET request until assetDeliveryState.state is COMPLETE, inspecting FAILED errors rather than submitting. Alternatively upload the packaged image manually under the product's App Review Information in App Store Connect. Local validation checks file readability and PNG/JPEG signatures; Apple still validates dimensions and review suitability. No screenshot is uploaded automatically.
 
 ## Google Play
 Use Authorization: Bearer with an OAuth token scoped to https://www.googleapis.com/auth/androidpublisher. POST each exported batch (maximum 100 distinct products) to its requests.json URL. allowMissing=true enables creation; matching existing IDs will be updated. The update mask replaces listings and purchaseOptions: inspect existing products and merge any options/localizations that must be retained before submitting. The single buy option is legacy-compatible and disables multi-quantity. Listed regional prices are explicit; no new-region auto-expansion is requested. Review taxes/compliance and activate purchase options manually in Play Console after creation.

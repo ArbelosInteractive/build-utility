@@ -6,6 +6,26 @@ using NUnit.Framework;
 
 public class DlcStoreCatalogExportTests
 {
+    static System.Collections.Generic.Dictionary<string,string> BuildMapped(JObject m, DlcStoreExportOptions o) => DlcStoreCatalogExport.Build(m,o,b=>b);
+    static string ExportMapped(JObject m, DlcStoreExportOptions o, string directory) => DlcStoreCatalogExport.Export(m,o,directory,b=>b);
+    [Test]
+    public void ApplePricePointFilesUseEachProductsPriceAndBaseTerritory()
+    {
+        var m=Manifest(2); var o=Options(m);
+        o.products[1].appleBasePrice="4.99";
+        var files=BuildMapped(m,o);
+        for(int i=0;i<o.products.Count;i++) {
+            var product=o.products[i];
+            var path="apple/"+(i+1).ToString("D4")+"/00-pricepoint.json";
+            var json=JObject.Parse(files[path]);
+            Assert.AreEqual(2,json.Count);
+            Assert.AreEqual(o.appleBaseTerritory,(string)json["territory"]);
+            Assert.AreEqual(product.appleBasePrice,(string)json["customerPrice"]);
+            StringAssert.Contains(path,files["requests.json"]);
+        }
+        o.apple=false;
+        Assert.IsFalse(BuildMapped(m,o).Keys.Any(k=>k.StartsWith("apple/")));
+    }
     static string screenshotFixture;
     static string ReviewScreenshotFixture()
     {
@@ -56,7 +76,7 @@ public class DlcStoreCatalogExportTests
         var m = Manifest(); var o = Options(m);
         o.products[0].appleReviewScreenshotPath = "";
         Assert.IsTrue(DlcStoreCatalogExport.Validate(m, o).Any(e => e.Contains("Apple review screenshot")));
-        Assert.Throws<InvalidOperationException>(() => DlcStoreCatalogExport.Build(m, o));
+        Assert.Throws<InvalidOperationException>(() => BuildMapped(m, o));
         o.apple = false;
         Assert.IsEmpty(DlcStoreCatalogExport.Validate(m, o));
     }
@@ -67,7 +87,7 @@ public class DlcStoreCatalogExportTests
         var m = Manifest(); var o = Options(m);
         string parent = Path.Combine(Path.GetTempPath(), "dlcpump-image-no-write-" + Guid.NewGuid().ToString("N"));
         o.products[0].appleReviewScreenshotPath = parent + ".png";
-        Assert.Throws<InvalidOperationException>(() => DlcStoreCatalogExport.Export(m, o, parent));
+        Assert.Throws<InvalidOperationException>(() => ExportMapped(m, o, parent));
         Assert.IsFalse(Directory.Exists(parent));
         string invalid = Path.Combine(Path.GetTempPath(), "dlcpump-invalid-" + Guid.NewGuid().ToString("N") + ".png");
         try
@@ -75,7 +95,7 @@ public class DlcStoreCatalogExportTests
             File.WriteAllText(invalid, "not an image");
             o.products[0].appleReviewScreenshotPath = invalid;
             Assert.IsTrue(DlcStoreCatalogExport.Validate(m, o).Any(e => e.Contains("image signature")));
-            Assert.Throws<InvalidOperationException>(() => DlcStoreCatalogExport.Export(m, o, parent));
+            Assert.Throws<InvalidOperationException>(() => ExportMapped(m, o, parent));
             Assert.IsFalse(Directory.Exists(parent));
         }
         finally { File.Delete(invalid); }
@@ -88,7 +108,7 @@ public class DlcStoreCatalogExportTests
         string parent = Path.Combine(Path.GetTempPath(), "dlcpump-images-" + Guid.NewGuid().ToString("N"));
         try
         {
-            string directory = DlcStoreCatalogExport.Export(m, o, parent);
+            string directory = ExportMapped(m, o, parent);
             var requests = (JArray)JObject.Parse(File.ReadAllText(Path.Combine(directory, "requests.json")))["requests"];
             for (int i = 1; i <= 2; i++)
             {
@@ -120,7 +140,7 @@ public class DlcStoreCatalogExportTests
         var options = Options(catalog);
         var releaseOnly = Manifest(1);
         var manifest = DlcStoreCatalogExport.ConfiguredProducts(catalog, options, (string)releaseOnly["releaseId"]);
-        var files = DlcStoreCatalogExport.Build(manifest, options);
+        var files = BuildMapped(manifest, options);
         Assert.AreEqual(1, ((JArray)releaseOnly["products"]).Count);
         Assert.AreEqual(3, ((JArray)manifest["products"]).Count);
         Assert.AreEqual(3, ((JArray)JObject.Parse(files["google/0001-batch.json"])["requests"]).Count);
@@ -136,7 +156,7 @@ public class DlcStoreCatalogExportTests
         var manifest = DlcStoreCatalogExport.ConfiguredProducts(catalog, options, "release");
         CollectionAssert.AreEqual(new[] { "pack_1", "pack_2" }, ((JArray)manifest["products"]).Select(p => (string)p["id"]).ToArray());
         options.products[1].appleBasePrice = "";
-        Assert.Throws<InvalidOperationException>(() => DlcStoreCatalogExport.Build(manifest, options));
+        Assert.Throws<InvalidOperationException>(() => BuildMapped(manifest, options));
         Assert.AreEqual(3, ((JArray)catalog["products"]).Count);
     }
 
@@ -149,9 +169,9 @@ public class DlcStoreCatalogExportTests
         options.products[0].productId = "pack_0";
         options.products.Add(options.products[0]);
         var manifest = DlcStoreCatalogExport.ConfiguredProducts(catalog, options, "release");
-        Assert.Throws<InvalidOperationException>(() => DlcStoreCatalogExport.Build(manifest, options));
+        Assert.Throws<InvalidOperationException>(() => BuildMapped(manifest, options));
         options.products.Clear();
-        Assert.Throws<InvalidOperationException>(() => DlcStoreCatalogExport.Build(DlcStoreCatalogExport.ConfiguredProducts(catalog, options, "release"), options));
+        Assert.Throws<InvalidOperationException>(() => BuildMapped(DlcStoreCatalogExport.ConfiguredProducts(catalog, options, "release"), options));
     }
 
     [Test]
@@ -160,7 +180,7 @@ public class DlcStoreCatalogExportTests
         var m = Manifest(); var o = Options(m);
         m["products"][0]["storeIDs"] = new JArray(new JObject { ["store"] = "AppleAppStore", ["id"] = "ios.pack" }, new JObject { ["store"] = "GooglePlay", ["id"] = "android.pack" });
         string before = m.ToString();
-        var files = DlcStoreCatalogExport.Build(m, o);
+        var files = BuildMapped(m, o);
         var pf = JObject.Parse(files["playfab/0001-create.json"]);
         Assert.IsFalse((bool)pf["Publish"]);
         Assert.AreEqual("catalogItem", (string)pf["Item"]["Type"]);
@@ -180,7 +200,7 @@ public class DlcStoreCatalogExportTests
     public void SplitsGoogleBatchesAtOneHundred()
     {
         var m = Manifest(201); var o = Options(m); o.apple = o.playFab = false;
-        var files = DlcStoreCatalogExport.Build(m, o);
+        var files = BuildMapped(m, o);
         Assert.AreEqual(100, ((JArray)JObject.Parse(files["google/0001-batch.json"])["requests"]).Count);
         Assert.AreEqual(100, ((JArray)JObject.Parse(files["google/0002-batch.json"])["requests"]).Count);
         Assert.AreEqual(1, ((JArray)JObject.Parse(files["google/0003-batch.json"])["requests"]).Count);
@@ -189,7 +209,7 @@ public class DlcStoreCatalogExportTests
     [Test]
     public void AppleDependenciesUseReturnedIdsAndExactPriceSelection()
     {
-        var m = Manifest(); var o = Options(m); var files = DlcStoreCatalogExport.Build(m, o);
+        var m = Manifest(); var o = Options(m); var files = BuildMapped(m, o);
         var requests = (JArray)JObject.Parse(files["requests.json"])["requests"];
         var lookup = requests.Single(r => (string)r["id"] == "apple-0001-pricepoints");
         StringAssert.Contains("{{apple-0001-create.data.id}}", (string)lookup["url"]);
@@ -212,7 +232,7 @@ public class DlcStoreCatalogExportTests
         var errors = DlcStoreCatalogExport.Validate(m, o);
         Assert.GreaterOrEqual(errors.Count, 7);
         string parent = Path.Combine(Path.GetTempPath(), "dlcpump-no-write-" + Guid.NewGuid().ToString("N"));
-        Assert.Throws<InvalidOperationException>(() => DlcStoreCatalogExport.Export(m, o, parent));
+        Assert.Throws<InvalidOperationException>(() => ExportMapped(m, o, parent));
         Assert.IsFalse(Directory.Exists(parent));
     }
 
@@ -228,7 +248,7 @@ public class DlcStoreCatalogExportTests
         Assert.IsTrue(errors.Any(e => e.Contains("Duplicate effective")));
         Assert.IsTrue(errors.Any(e => e.Contains("duplicate Apple locales")));
         Assert.IsTrue(errors.Any(e => e.Contains("only non-consumable")));
-        Assert.Throws<InvalidOperationException>(() => DlcStoreCatalogExport.Build(m, o));
+        Assert.Throws<InvalidOperationException>(() => BuildMapped(m, o));
     }
 
     [Test]
@@ -253,7 +273,7 @@ public class DlcStoreCatalogExportTests
         DlcStoreCatalogExport.AddMissingProducts(m, o);
         o.products[0].localizations = null;
         Assert.IsEmpty(DlcStoreCatalogExport.Validate(m, o));
-        Assert.IsTrue(DlcStoreCatalogExport.Build(m, o).ContainsKey("playfab/0001-create.json"));
+        Assert.IsTrue(BuildMapped(m, o).ContainsKey("playfab/0001-create.json"));
     }
 
     [Test]
@@ -267,9 +287,9 @@ public class DlcStoreCatalogExportTests
         string parent = Path.Combine(Path.GetTempPath(), "dlcpump-export-test-" + Guid.NewGuid().ToString("N"));
         try
         {
-            string first = DlcStoreCatalogExport.Export(m, o, parent);
+            string first = ExportMapped(m, o, parent);
             string before = File.ReadAllText(Path.Combine(first, "requests.json"));
-            string second = DlcStoreCatalogExport.Export(m, o, parent);
+            string second = ExportMapped(m, o, parent);
             Assert.AreNotEqual(first, second);
             Assert.AreEqual(before, File.ReadAllText(Path.Combine(first, "requests.json")));
             Assert.IsTrue(File.Exists(Path.Combine(second, "README.md")));
