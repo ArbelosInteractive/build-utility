@@ -27,7 +27,7 @@ from pathlib import Path
 from tkinter import filedialog, messagebox, ttk
 
 from iap_secrets import APPLE_KEY_ID, SecretError, Vault
-from upload_all import DEFAULTS, ORDER, load_config
+from upload_all import DEFAULTS, ORDER, load_config, resolve_path
 
 HERE = Path(__file__).resolve().parent
 LABEL = {"apple": "Apple App Store", "google": "Google Play", "playfab": "PlayFab"}
@@ -471,8 +471,7 @@ class App:
         values = {k: (v.strip() or DEFAULTS[k]) for k, v in values.items()}
         base = self.config_path.parent
         missing = [f"{k}: {values[k]}" for k, _, kind in CONFIG_FIELDS
-                   if k != "log_dir" and kind != "text" and not (base / values[k]).expanduser().exists()
-                   and not Path(values[k]).expanduser().exists()]
+                   if k != "log_dir" and kind != "text" and not resolve_path(values[k], base).exists()]
         if missing and not messagebox.askyesno(
                 "Paths not found", "These paths don't exist (yet):\n\n" + "\n".join(missing)
                 + "\n\nSave anyway?"):

@@ -17,7 +17,9 @@ Usage:  python upload_all.py --dry-run
 """
 import argparse
 import datetime
+import glob
 import json
+import os
 import subprocess
 import sys
 from pathlib import Path
@@ -30,9 +32,9 @@ ORDER = ["apple", "google", "playfab"]
 DEFAULTS = {
     "keyvault_name": "",
     "azure_tenant": "",
-    "apple_root": "apple",
-    "google_input": "google",
-    "playfab_input": "playfab",
+    "apple_root": "dlc-store-export*/apple",
+    "google_input": "dlc-store-export*/google",
+    "playfab_input": "dlc-store-export*/playfab",
     "log_dir": "logs",
 }
 TEXT_KEYS = ("keyvault_name", "azure_tenant")  # settings that are not paths
@@ -40,6 +42,21 @@ TEXT_KEYS = ("keyvault_name", "azure_tenant")  # settings that are not paths
 
 SCRIPTS = {"apple": "upload_apple_iap.py", "google": "upload_google_iap.py",
            "playfab": "upload_playfab_items.py"}
+
+
+def resolve_path(value, base):
+    """A path relative to `base` (unless absolute). `*` and `?` work: if several folders match,
+    the most recently modified one is used. With no match the path is returned as written."""
+    p = Path(value).expanduser()
+    if not p.is_absolute():
+        p = base / p
+    if any(c in str(value) for c in "*?"):
+        pattern = str(p) if Path(value).expanduser().is_absolute() else \
+            glob.escape(str(base)) + os.sep + str(value)
+        matches = sorted(glob.glob(pattern), key=os.path.getmtime)
+        if matches:
+            return Path(matches[-1])
+    return p
 
 
 def load_config(path):
@@ -53,8 +70,7 @@ def load_config(path):
         if key in TEXT_KEYS:
             out[key] = str(value).strip()
             continue
-        p = Path(value).expanduser()
-        out[key] = p if p.is_absolute() else base / p
+        out[key] = resolve_path(value, base)
     return out
 
 
@@ -119,6 +135,9 @@ def main():
     platforms = [p for p in ORDER if not args.only or p in args.only]
     print(f"Config:    {args.config}")
     print(f"Platforms: {', '.join(platforms)}" + ("   (dry run)" if args.dry_run else ""))
+    for platform, key in (("apple", "apple_root"), ("google", "google_input"), ("playfab", "playfab_input")):
+        if platform in platforms:
+            print(f"  {platform:<8} {cfg[key]}")
 
     problems = preflight(cfg, platforms, args.dry_run)
     if problems:

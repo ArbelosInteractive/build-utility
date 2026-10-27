@@ -126,9 +126,9 @@ A dry run (`--dry-run`) sends nothing and needs no sign-in. Real runs check up f
   "keyvault_name": "arbelos-iap-kv",
   "azure_tenant": "",
 
-  "apple_root": "apple",
-  "google_input": "google",
-  "playfab_input": "playfab",
+  "apple_root": "dlc-store-export*/apple",
+  "google_input": "dlc-store-export*/google",
+  "playfab_input": "dlc-store-export*/playfab",
   "log_dir": "logs"
 }
 ```
@@ -142,7 +142,9 @@ A dry run (`--dry-run`) sends nothing and needs no sign-in. Real runs check up f
 | `playfab_input` | the folder with the PlayFab JSON files |
 | `log_dir` | where log files are written |
 
-Relative paths are relative to the config file's folder. Absolute paths work too; on Windows use forward slashes (`C:/data/apple`) or doubled backslashes. The product JSON folders can live anywhere, including outside the project, so they don't have to be in git.
+Relative paths are relative to the config file's folder. Absolute paths work too; on Windows use forward slashes (`C:/data/apple`) or doubled backslashes. The product JSON folders can live anywhere, including outside the project, so they don't have to be in git. If the export folder is not inside the config's folder, use `..`, for example `../../dlc-store-export*/apple`.
+
+**Wildcards:** `*` and `?` work in these paths, so `dlc-store-export*/apple` finds `dlc-store-export-2026-10-27/apple`. If several folders match, the most recently modified one is used. The wrapper prints the folders it picked at the start of each run, so check that line. If nothing matches, it reports that the path does not exist.
 
 The older keys `apple_credentials`, `google_credentials` and `playfab_credentials` are no longer used and can be deleted.
 
