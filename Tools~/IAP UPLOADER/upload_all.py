@@ -11,6 +11,8 @@ Everything printed is also written to one log file for the run:
     <log_dir>\upload_all_<date>_<time>.log
 
 Usage:  python upload_all.py --dry-run
+        python upload_all.py --only apple --item 0001 0002     (just these items of one platform)
+        python upload_all.py --only apple google --apple-item 0001 --google-item wrestler_x
         python upload_all.py
         python upload_all.py --only google playfab
         python upload_all.py --activate --publish
@@ -101,12 +103,18 @@ def command(platform, cfg, args, log_path):
     cmd = [sys.executable, str(HERE / SCRIPTS[platform])]
     if platform == "apple":
         cmd += ["--root", str(cfg["apple_root"])]
+        if args.items.get("apple"):
+            cmd += ["--products", *args.items["apple"]]
     elif platform == "google":
         cmd += ["--input", str(cfg["google_input"])]
+        if args.items.get("google"):
+            cmd += ["--only", *args.items["google"]]
         if args.activate:
             cmd.append("--activate")
     else:
         cmd += ["--input", str(cfg["playfab_input"])]
+        if args.items.get("playfab"):
+            cmd += ["--only", *args.items["playfab"]]
         if args.publish:
             cmd.append("--publish")
     if cfg["keyvault_name"]:
@@ -123,11 +131,22 @@ def main():
                     help="paths file (default: upload_config.json next to this script)")
     ap.add_argument("--only", nargs="+", choices=ORDER, metavar="PLATFORM",
                     help="run just these: apple google playfab (they still run in that order)")
+    ap.add_argument("--item", nargs="+", metavar="ID",
+                    help="upload only these items; needs exactly one platform in --only.\n"
+                         "Apple: folder names (0001), Google: product IDs, PlayFab: FriendlyIds")
+    for name in ORDER:
+        ap.add_argument(f"--{name}-item", nargs="+", metavar="ID",
+                        help=f"like --item, but just for {name}; can be combined across platforms")
     ap.add_argument("--activate", action="store_true", help="Google: make purchase options active")
     ap.add_argument("--publish", action="store_true", help="PlayFab: publish items instead of leaving drafts")
     ap.add_argument("--dry-run", action="store_true", help="validate and print only, nothing is sent")
     args = ap.parse_args()
 
+    if args.item and not (args.only and len(args.only) == 1):
+        ap.error("--item needs exactly one platform, e.g. --only apple --item 0001")
+    args.items = {p: getattr(args, f"{p}_item") for p in ORDER if getattr(args, f"{p}_item")}
+    if args.item:
+        args.items[args.only[0]] = args.item
     cfg = load_config(args.config)
     log_path = cfg["log_dir"] / f"upload_all_{datetime.datetime.now():%Y-%m-%d_%H-%M-%S}.log"
     setup_logging("upload_all", log_path)

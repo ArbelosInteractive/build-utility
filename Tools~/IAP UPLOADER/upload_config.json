@@ -1,5 +1,5 @@
 {
-  "keyvault_name": "arbelos-iap-kv",
+  "keyvault_name": "tsw-iap",
   "azure_tenant": "",
 
   "apple_root": "dlc-store-export*/apple",

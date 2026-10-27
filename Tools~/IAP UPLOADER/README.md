@@ -160,6 +160,8 @@ python upload_all.py
 | Option | What it does |
 |---|---|
 | `--dry-run` | checks the files and prints what would happen; sends nothing, needs no credentials or sign-in |
+| `--apple-item`, `--google-item`, `--playfab-item ID ...` | like `--item`, but per platform, so you can combine them: `python upload_all.py --only apple google --apple-item 0001 --google-item wrestler_x` |
+| `--item ID ...` | upload only these items; use with exactly one platform in `--only`. Apple: folder names (`0001`), Google: product IDs, PlayFab: FriendlyIds. Example: `python upload_all.py --only apple --item 0001 0002` |
 | `--only apple google playfab` | run only the platforms you list (they still run in Apple, Google, PlayFab order) |
 | `--activate` | Google: make the purchase options active, i.e. purchasable (otherwise they stay as drafts) |
 | `--publish` | PlayFab: publish the items (otherwise they stay as drafts) |
@@ -188,6 +190,8 @@ The window has:
 - buttons **Upload to Apple App Store**, **Upload to Google Play**, **Upload to PlayFab** and **Upload ALL**
 - tick boxes: **Dry run** (check only, send nothing), **Google: make purchase options active**, **PlayFab: publish items**
 - a live log of what the upload is doing, and a **Status** column that changes to Created / Updated / FAILED / Not processed as each item finishes
+- **tick boxes** in the Upload column of each product (click the box, or select rows and press Space). Ticking a store heading ticks everything in that store, and **Select all products** above the list ticks or unticks every product. **Upload selected (N)** uploads just the ticked products, across any mix of stores (Apple, then Google, then PlayFab, stopping at the first failure). Products that can't be uploaded (shown in red) can't be ticked, and **Reload products** clears the ticks.
+- **right-click** a product to upload only that product (or select several in the same store with Ctrl or Shift, then right-click). Right-clicking a store heading offers to upload everything in that store. The Dry run, Google activate and PlayFab publish options still apply, and the other rows are left alone.
 - **Reload products** (re-reads the folders after you edit a JSON file), **Stop**, and **Clear log**, which empties the output window (it never touches the log files in the `logs` folder)
 - **Settings...**, which edits `upload_config.json` for you: type a path or use the Browse buttons for the Apple folder, Google file or folder, PlayFab folder, the Key Vault name and optional tenant, and the log folder. Paths inside the config's folder are saved as relative paths. If a path doesn't exist yet, you're asked before saving. After saving, the product list reloads. Other keys already in the file are kept.
 

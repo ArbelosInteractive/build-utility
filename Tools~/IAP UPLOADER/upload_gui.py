@@ -53,6 +53,7 @@ CONFIG_FIELDS = [  # (key in upload_config.json, label, what can be picked)
     ("log_dir", "Log folder", "dir"),
 ]
 NO_WINDOW = getattr(subprocess, "CREATE_NO_WINDOW", 0)
+UNCHECKED, CHECKED = "\u2610", "\u2611"  # ballot box, ballot box with check
 
 
 # ------------------------------------------------------------- signing in to Azure
@@ -167,7 +168,7 @@ def load_apple(root):
                     problem = f"screenshot file missing: {shot_name}"
             items.append({"key": f"{folder.name} ({attrs['productId']})", "id": attrs["productId"],
                           "name": attrs.get("name", ""), "details": ", ".join(d for d in details if d),
-                          "problem": problem})
+                          "problem": problem, "arg": folder.name})
         except Exception as e:  # a broken folder is shown, not hidden
             items.append({"key": folder.name, "id": folder.name, "name": "", "details": "",
                           "problem": f"cannot read ({type(e).__name__}: {e})"})
@@ -191,7 +192,8 @@ def load_google(target):
                           for o in prod.get("purchaseOptions", [])
                           for c in o.get("regionalPricingAndAvailabilityConfigs", []) if "price" in c]
                 items.append({"key": prod["productId"], "id": prod["productId"], "name": title,
-                              "details": ", ".join(prices), "problem": None})
+                              "details": ", ".join(prices), "problem": None,
+                              "arg": prod["productId"]})
         except Exception as e:
             items.append({"key": f.name, "id": f.name, "name": "", "details": "",
                           "problem": f"cannot read ({type(e).__name__}: {e})"})
@@ -209,7 +211,7 @@ def load_playfab(target):
             item = _read(f)["Item"]
             fid = next(a["Value"] for a in item["AlternateIds"] if a.get("Type") == "FriendlyId")
             items.append({"key": fid, "id": fid, "name": item.get("Title", {}).get("NEUTRAL", ""),
-                          "details": item.get("ContentType", ""), "problem": None})
+                          "details": item.get("ContentType", ""), "problem": None, "arg": fid})
         except Exception as e:
             items.append({"key": f.name, "id": f.name, "name": "", "details": "",
                           "problem": f"cannot read ({type(e).__name__}: {e})"})
@@ -263,10 +265,14 @@ def match_item(items, name):
     return None
 
 
-def build_command(config_path, platforms, dry_run, activate, publish):
+def build_command(config_path, platforms, dry_run, activate, publish, items=None):
+    """`items` is None (everything) or {platform: [item ids]} for a partial upload."""
     cmd = [sys.executable, "-u", str(HERE / "upload_all.py"), "--config", str(config_path)]
     if set(platforms) != set(ORDER):
         cmd += ["--only", *[p for p in ORDER if p in platforms]]
+    for platform in ORDER:
+        if items and items.get(platform):
+            cmd += [f"--{platform}-item", *items[platform]]
     if dry_run:
         cmd.append("--dry-run")
     if activate and "google" in platforms:
@@ -281,9 +287,11 @@ class App:
     def __init__(self, root, config_path):
         self.root, self.config_path = root, Path(config_path)
         self.items, self.rows, self.groups = {}, {}, {}
+        self.checked, self.iid_item, self.group_platform = set(), {}, {}
         self.group_state = {}
         self.queue, self.proc, self.running, self.stopping = queue.Queue(), None, False, False
         self.parser, self.run_platforms, self.run_dry = StatusParser(), [], False
+        self.run_only = None
 
         root.title("IAP Uploader")
         root.geometry("1050x720")
@@ -311,18 +319,30 @@ class App:
         self.azure_buttons = [self.signin_button, self.recheck_button, self.signout_button]
         self.azure_busy = False
 
+        bar = ttk.Frame(root, padding=(10, 0, 10, 4))
+        bar.pack(fill="x")
+        self.master_var = tk.BooleanVar()
+        self.master_check = ttk.Checkbutton(bar, text="Select all products", variable=self.master_var,
+                                            command=self.on_master)
+        self.master_check.pack(side="left")
+        ttk.Label(bar, text="   Click the box in the Upload column (or press Space) to tick products.").pack(
+            side="left")
+
         body = ttk.Frame(root, padding=(10, 0))
         body.pack(fill="both", expand=True)
-        columns = ("id", "name", "details", "status")
+        columns = ("sel", "id", "name", "details", "status")
         self.tree = ttk.Treeview(body, columns=columns, show="tree headings", height=12)
         self.tree.heading("#0", text="Store")
-        for col, text, width in (("id", "Product ID", 230), ("name", "Name", 200),
+        for col, text, width in (("sel", "Upload", 60), ("id", "Product ID", 230), ("name", "Name", 200),
                                  ("details", "Details", 260), ("status", "Status", 130)):
             self.tree.heading(col, text=text)
-            self.tree.column(col, width=width, anchor="w")
+            self.tree.column(col, width=width, anchor="center" if col == "sel" else "w")
         self.tree.column("#0", width=170)
         scroll = ttk.Scrollbar(body, orient="vertical", command=self.tree.yview)
         self.tree.configure(yscrollcommand=scroll.set)
+        self.tree.bind("<Button-3>", self.on_right_click)
+        self.tree.bind("<Button-1>", self.on_left_click)
+        self.tree.bind("<space>", self.on_space)
         self.tree.pack(side="left", fill="both", expand=True)
         scroll.pack(side="left", fill="y")
         for tag, color in (("ok", "#1a7f37"), ("fail", "#cf222e"), ("run", "#0969da"),
@@ -340,6 +360,9 @@ class App:
         b = ttk.Button(buttons, text="Upload ALL", command=lambda: self.start(list(ORDER)))
         b.pack(side="left", padx=(12, 6))
         self.buttons.append(b)
+        self.selected_button = ttk.Button(buttons, text="Upload selected (0)", command=self.start_selected,
+                                          state="disabled")
+        self.selected_button.pack(side="left", padx=(6, 0))
         self.buttons.append(self.settings_button)
         self.buttons += self.azure_buttons
         self.stop_button = ttk.Button(buttons, text="Stop", command=self.stop, state="disabled")
@@ -497,17 +520,22 @@ class App:
             return
         self.tree.delete(*self.tree.get_children())
         self.rows, self.groups = {}, {}
+        self.checked, self.iid_item, self.group_platform = set(), {}, {}
         for platform in ORDER:
             items = self.items[platform]
             group = self.tree.insert("", "end", text=LABEL[platform], open=True, tags=("group",),
-                                     values=("", f"{len(items)} product(s)", "", "Pending"))
+                                     values=(UNCHECKED, "", f"{len(items)} product(s)", "", "Pending"))
             self.groups[platform], self.rows[platform] = group, []
+            self.group_platform[group] = platform
             self.group_state[platform] = "idle"
             for item in items:
-                iid = self.tree.insert(group, "end", values=(item["id"], item["name"], item["details"],
+                iid = self.tree.insert(group, "end", values=("" if item["problem"] else UNCHECKED, item["id"],
+                                                             item["name"], item["details"],
                                                              item["problem"] or "Pending"),
                                        tags=("fail",) if item["problem"] else ())
                 self.rows[platform].append((iid, item))
+                self.iid_item[iid] = (platform, item)
+        self.refresh_selection_ui()
         self.status.set("Ready")
 
     def set_status(self, iid, text, tag=None):
@@ -516,7 +544,111 @@ class App:
             self.tree.item(iid, tags=(tag,) if tag else ())
 
     # ---- running
-    def start(self, platforms):
+    def on_right_click(self, event):
+        """Right-click a product (or several selected ones) to upload just those."""
+        if self.running:
+            return
+        iid = self.tree.identify_row(event.y)
+        if not iid:
+            return
+        if iid not in self.tree.selection():
+            self.tree.selection_set(iid)
+        menu = tk.Menu(self.root, tearoff=0)
+        platform = next((p for p, g in self.groups.items() if g == iid), None)
+        if platform:  # the store heading
+            menu.add_command(label=f"Upload all to {LABEL[platform]}", command=lambda: self.start([platform]))
+        else:
+            picked = {}
+            for sel in self.tree.selection():
+                for p, rows in self.rows.items():
+                    for row_iid, item in rows:
+                        if row_iid == sel:
+                            picked.setdefault(p, []).append(item)
+            if len(picked) != 1:
+                menu.add_command(label="Select products from one store only", state="disabled")
+            else:
+                (platform, chosen), = picked.items()
+                bad = [i for i in chosen if i["problem"]]
+                if bad:
+                    menu.add_command(label="Can't upload: a selected product has a problem", state="disabled")
+                else:
+                    count = len(chosen)
+                    label = (f"Upload '{chosen[0]['id']}' only to {LABEL[platform]}" if count == 1
+                             else f"Upload these {count} products only to {LABEL[platform]}")
+                    menu.add_command(label=label, command=lambda: self.start(
+                        [platform], {platform: [i["arg"] for i in chosen]}))
+        try:
+            menu.tk_popup(event.x_root, event.y_root)
+        finally:
+            menu.grab_release()
+
+    # ---- ticking products
+    def on_left_click(self, event):
+        if self.tree.identify_region(event.x, event.y) != "cell" or self.tree.identify_column(event.x) != "#1":
+            return None
+        iid = self.tree.identify_row(event.y)
+        if iid and not self.running:
+            self.toggle(iid)
+        return "break"
+
+    def on_space(self, event):
+        if not self.running:
+            for iid in self.tree.selection():
+                self.toggle(iid)
+        return "break"
+
+    def set_checked(self, iid, value):
+        found = self.iid_item.get(iid)
+        if found and not found[1]["problem"]:
+            (self.checked.add if value else self.checked.discard)(iid)
+            self.tree.set(iid, "sel", CHECKED if value else UNCHECKED)
+
+    def uploadable(self, platform):
+        return [iid for iid, item in self.rows.get(platform, []) if not item["problem"]]
+
+    def toggle(self, iid):
+        platform = self.group_platform.get(iid)
+        if platform:
+            kids = self.uploadable(platform)
+            new = not (kids and all(k in self.checked for k in kids))
+            for k in kids:
+                self.set_checked(k, new)
+        else:
+            self.set_checked(iid, iid not in self.checked)
+        self.refresh_selection_ui()
+
+    def on_master(self):
+        value = self.master_var.get()
+        for platform in ORDER:
+            for iid in self.uploadable(platform):
+                self.set_checked(iid, value)
+        self.refresh_selection_ui()
+
+    def refresh_selection_ui(self):
+        """Update the group boxes, the Select all box and the Upload selected button."""
+        every = []
+        for platform in ORDER:
+            kids = self.uploadable(platform)
+            every += kids
+            if platform in self.groups:
+                full = bool(kids) and all(k in self.checked for k in kids)
+                self.tree.set(self.groups[platform], "sel", CHECKED if full else UNCHECKED)
+        self.master_var.set(bool(every) and all(k in self.checked for k in every))
+        count = len(self.checked)
+        self.selected_button.configure(text=f"Upload selected ({count})",
+                                       state="normal" if count and not self.running else "disabled")
+
+    def start_selected(self):
+        chosen = {}
+        for platform in ORDER:
+            args = [item["arg"] for iid, item in self.rows.get(platform, []) if iid in self.checked]
+            if args:
+                chosen[platform] = args
+        if chosen:
+            self.start([p for p in ORDER if p in chosen], chosen)
+
+    def start(self, platforms, only=None):
+        """Upload the given stores. `only` is {store: [item ids]} for a partial upload."""
         if self.running:
             return
         empty = [LABEL[p] for p in platforms if not self.items.get(p)]
@@ -524,8 +656,9 @@ class App:
             messagebox.showwarning("Nothing to upload", f"No products were found for: {', '.join(empty)}.")
             return
         dry = self.dry_var.get()
+        self.run_only = {p: set(v) for p, v in only.items()} if only else None
         if not dry:
-            total = sum(len(self.items[p]) for p in platforms)
+            total = sum(len(v) for v in only.values()) if only else sum(len(self.items[p]) for p in platforms)
             names = ", ".join(LABEL[p] for p in platforms)
             if not messagebox.askyesno(
                     "Confirm upload",
@@ -536,14 +669,19 @@ class App:
             self.group_state[p] = "waiting"
             self.set_status(self.groups[p], "Waiting", "muted")
             for iid, item in self.rows[p]:
-                if not item["problem"]:
+                if not item["problem"] and self.in_run(p, item):
                     self.set_status(iid, "Waiting", "muted")
         self.parser, self.run_platforms, self.run_dry = StatusParser(), list(platforms), dry
-        cmd = build_command(self.config_path, platforms, dry, self.activate_var.get(), self.publish_var.get())
-        self.write(f">>> {'Dry run: ' if dry else ''}{', '.join(LABEL[p] for p in platforms)}\n")
+        cmd = build_command(self.config_path, platforms, dry, self.activate_var.get(), self.publish_var.get(),
+                            only)
+        what = f"{sum(len(v) for v in only.values())} selected item(s) to " if only else ""
+        self.write(f">>> {'Dry run: ' if dry else ''}{what}{', '.join(LABEL[p] for p in platforms)}\n")
         self.set_running(True)
         self.stopping = False
         threading.Thread(target=self.worker, args=(cmd,), daemon=True).start()
+
+    def in_run(self, platform, item):
+        return self.run_only is None or item.get("arg") in self.run_only.get(platform, ())
 
     def worker(self, cmd):
         env = dict(os.environ, PYTHONUNBUFFERED="1", PYTHONIOENCODING="utf-8")
@@ -598,7 +736,7 @@ class App:
                 self.group_state[event[1]] = "running"
                 self.set_status(self.groups[event[1]], "Running...", "run")
                 for iid, item in self.rows[event[1]]:
-                    if not item["problem"]:
+                    if not item["problem"] and self.in_run(event[1], item):
                         self.set_status(iid, "Running...", "run")
             elif event[0] == "failed":
                 self.group_state[event[1]] = "failed"
@@ -638,6 +776,8 @@ class App:
             b.configure(state="disabled" if running or (self.azure_busy and b in self.azure_buttons)
                         else "normal")
         self.stop_button.configure(state="normal" if running else "disabled")
+        self.master_check.configure(state="disabled" if running else "normal")
+        self.refresh_selection_ui()
         if running:
             self.status.set("Running...")
 
