@@ -1,0 +1,9 @@
+{
+  "keyvault_name": "tsw-iap",
+  "azure_tenant": "",
+
+  "apple_root": "dlc-store-export*/apple",
+  "google_input": "dlc-store-export*/google",
+  "playfab_input": "dlc-store-export*/playfab",
+  "log_dir": "logs"
+}
