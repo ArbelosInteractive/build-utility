@@ -54,10 +54,10 @@ public sealed class DlcIconStudioWindow : EditorWindow
         var toolbar = new Toolbar(); root.Add(toolbar);
         toolbar.Add(new ToolbarButton(DlcArtistWindow.Open) { text = "Release Waves" });
         toolbar.Add(new Label("Icon Studio"));
-        toolbar.Add(new ToolbarButton(() => EditorUtility.DisplayDialog("Icon Studio — how to use", "1. Open a product's Icon button in Release Waves, or create a document and set its product ID.\n2. Choose a canvas size before New. Use 64 for pixel art or 256/512 for a headshot.\n3. Add a template layer or import artwork. Enable Smooth headshot before importing photographic art.\n4. Select a layer, paint, and preview at 64/128 pixels. Select then Move relocates pixels; Undo/Redo is supported.\n5. Save draft preserves layers. Export PNG saves a standalone image. Assign to product writes the game's icon and keeps a backup when replacing an existing PNG.\n\nRestart Play mode to refresh cached game icons. No PlayFab uploads occur.", "OK")) { text = "Help" });
+        toolbar.Add(new ToolbarButton(() => EditorUtility.DisplayDialog("Icon Studio — how to use", "1. Open a product's Icon button in Release Waves, or create a document and set its product ID.\n2. Choose a canvas size before New. Use 64 for pixel art or 256/512 for a headshot.\n3. Add a template layer or import artwork. Enable Smooth headshot before importing photographic art.\n4. Select a layer, paint, and preview at 64/128 pixels. Select then Move relocates pixels; Undo/Redo is supported.\n5. Save draft preserves layers. Export PNG saves a standalone image. Assign to product writes the game's icon and keeps a backup when replacing an existing PNG.\n\nAssign updates the local fallback. Use Review PlayFab upload to review and publish the thumbnail separately. The updated game downloads remote artwork with a local fallback.", "OK")) { text = "Help" });
         toolbar.Add(new ToolbarButton(() => { AssetDatabase.SaveAssets(); Say("Editable draft saved."); }) { text = "Save draft" });
         toolbar.Add(new ToolbarButton(Undo.PerformUndo) { text = "Undo" }); toolbar.Add(new ToolbarButton(Undo.PerformRedo) { text = "Redo" });
-        root.Add(new HelpBox("Local icon authoring. Assign saves a PNG for the game's Resources loader. PlayFab uploads and larger detail-image rendering are not connected in this phase.", HelpBoxMessageType.Info));
+        root.Add(new HelpBox("Paint icons, assign a local fallback, or review a PlayFab thumbnail upload. Larger detail-image rendering is separate; existing PlayFab Screenshot artwork is preserved.", HelpBoxMessageType.Info));
         var top = DlcArtistWindow.Row(); root.Add(top);
         var asset = new ObjectField("Icon document") { objectType = typeof(DlcIconDocument), allowSceneObjects = false, value = document }; asset.style.flexGrow = 1;
         asset.RegisterValueChangedCallback(e => { document = e.newValue as DlcIconDocument; layer = 0; selection = new RectInt(); RefreshTexture(); CreateGUI(); }); top.Add(asset);
@@ -103,6 +103,7 @@ public sealed class DlcIconStudioWindow : EditorWindow
         pane.Add(new IMGUIContainer(DrawCanvas));
         var actions = DlcArtistWindow.Row(); root.Add(actions);
         actions.Add(DlcArtistWindow.Button("Export PNG…", Export)); actions.Add(DlcArtistWindow.Button("Assign to product", Assign));
+        actions.Add(DlcArtistWindow.Button("Review PlayFab upload…", () => DlcPlayFabWindow.ForIcon(document)));
         root.Add(status);
         if (!preview) RefreshTexture();
     }

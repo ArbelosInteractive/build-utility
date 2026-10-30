@@ -1,4 +1,13 @@
 # Changelog
+
+## [1.0.58] - 2026-10-30
+
+- Add an explicit PlayFab review/publish panel for availability waves, promotions and Icon Studio thumbnails on existing Economy v2 items.
+- Protect concurrent edits with ETags, reject unrelated pending drafts, preserve prices/localizations/detail artwork, and verify published fields with per-item receipts.
+- Keep title credentials in an external environment variable and an in-memory token; no automatic live requests or marketplace activation.
+- Document deployment prerequisites and the updated TSW client's independent inventory resolution, refreshed offer checks and asynchronous remote artwork fallback.
+- Add mocked publishing regressions covering conflicts, cancellation, repeat publication, image preservation and read-back failures.
+
 All notable changes to this project will be documented in this file.
 
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),

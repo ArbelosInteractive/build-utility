@@ -10,6 +10,18 @@ using UnityEngine.UIElements;
 
 public class DlcArtistWindowTests
 {
+    [Test] public void PlayFabWindowRequiresExplicitReviewAndPublish()
+    {
+        var window = ScriptableObject.CreateInstance<DlcPlayFabWindow>();
+        try
+        {
+            window.CreateGUI();
+            Assert.IsTrue(window.rootVisualElement.Query<Button>().ToList().Any(b => b.text == "Read & review PlayFab changes"));
+            Assert.IsTrue(window.rootVisualElement.Query<Button>().ToList().Any(b => b.text == "Publish reviewed changes…"));
+            Assert.IsTrue(window.rootVisualElement.Query<TextField>().ToList().Single(f => f.label == "Reviewed changes").isReadOnly);
+        }
+        finally { UnityEngine.Object.DestroyImmediate(window); }
+    }
     sealed class Adapter : IDlcProjectAdapter
     {
         public string CatalogPath { get; set; }

@@ -31,9 +31,9 @@ public sealed class DlcArtistWindow : EditorWindow
         toolbar.Add(new ToolbarButton(() => DlcManagerWindow.Open()) { text = "DLC Pump" });
         toolbar.Add(new Label("Release Waves"));
         toolbar.Add(new ToolbarButton(DlcIconStudioWindow.Open) { text = "Icon Studio" });
-        toolbar.Add(new ToolbarButton(() => EditorUtility.DisplayDialog("Release Waves — how to use", "1. Create a schedule outside Resources.\n2. Add a wave and enter dates (YYYY-MM-DD HH:mm). Choose your system time zone.\n3. Drag products from the shelf, select and Add selected, or drop a DLC Release asset.\n4. Use the preview date to inspect active/scheduled/ended states.\n5. Validate, save drafts, and Export JSON.\n\nThe JSON is a DLC Pump schedule, not a PlayFab API request. This phase does not change live availability. Unassigned products and existing ownership remain unchanged.", "OK")) { text = "Help" });
+        toolbar.Add(new ToolbarButton(() => EditorUtility.DisplayDialog("Release Waves — how to use", "1. Create a schedule outside Resources.\n2. Add a wave and enter dates (YYYY-MM-DD HH:mm). Choose your system time zone.\n3. Drag products from the shelf, select and Add selected, or drop a DLC Release asset.\n4. Use the preview date to inspect active/scheduled/ended states.\n5. Validate, save drafts, and Export JSON.\n\nThe JSON is a DLC Pump schedule, not a PlayFab API request. Use Review PlayFab to inspect changes, then explicitly publish after the updated game client is deployed. Saving or exporting alone does not change live availability. Unassigned products remain unchanged.", "OK")) { text = "Help" });
         toolbar.Add(new ToolbarButton(() => { AssetDatabase.SaveAssets(); SetStatus("Drafts saved. No remote services changed."); }) { text = "Save drafts" });
-        root.Add(new HelpBox("Local release planning and JSON export. These drafts do not change PlayFab, Apple, Google, or existing ownership. Store readiness is not checked.", HelpBoxMessageType.Info));
+        root.Add(new HelpBox("Plan releases locally and export JSON, or use Review PlayFab to publish reviewed dates. Saving drafts does not change live availability. Apple/Google readiness is separate.", HelpBoxMessageType.Info));
         var row = Row(); root.Add(row);
         var asset = new ObjectField("Schedule") { objectType = typeof(DlcWaveSchedule), value = schedule, allowSceneObjects = false }; asset.style.flexGrow = 1;
         asset.RegisterValueChangedCallback(e => { schedule = e.newValue as DlcWaveSchedule; selectedWave = 0; Rebuild(); }); row.Add(asset);
@@ -72,6 +72,7 @@ public sealed class DlcArtistWindow : EditorWindow
         settings.Add(Button("New wave", () => Change("Add wave", () => { schedule.waves.Add(new DlcWave()); selectedWave = schedule.waves.Count - 1; })));
         settings.Add(Button("Validate", () => ShowValidation()));
         settings.Add(Button("Export JSON", Export));
+        settings.Add(Button("Review PlayFab…", () => DlcPlayFabWindow.ForSchedule(schedule)));
         var columns = new TwoPaneSplitView(0, 240, TwoPaneSplitViewOrientation.Horizontal); columns.style.flexGrow = 1; body.Add(columns);
         var shelf = new ScrollView(); shelf.style.minWidth = 170; columns.Add(shelf);
         shelf.Add(new Label("PRODUCT SHELF · drag or select"));

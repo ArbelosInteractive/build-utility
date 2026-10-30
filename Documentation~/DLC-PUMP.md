@@ -2,9 +2,9 @@
 
 Open **Build Utility > DLC Pump**. DLC Pump manages local DLC release definitions and build evidence. Its window uses the Arbelos water-pump icon.
 
-## Artist workspace (1.0.57)
+## Artist workspace (1.0.58)
 
-Open **Release Waves** or **Icon Studio** from the DLC Pump header. They are independent dockable editor windows; no content build or selected release is required. Both have **Help** buttons. This version implements local artist authoring and export. It does not connect to PlayFab or change Apple/Google availability. The later live integration must separate owned inventory from visible offers before applying availability dates.
+Open **Release Waves** or **Icon Studio** from the DLC Pump header. They are independent dockable editor windows; no content build or selected release is required. Both have **Help** buttons. Drafts stay local until you use **Review PlayFab** and explicitly publish. The updated TSW client resolves owned inventory independently of visible offers. Apple/Google availability remains a separate marketplace task.
 
 ### Release Waves
 
@@ -14,7 +14,7 @@ Open **Release Waves** or **Icon Studio** from the DLC Pump header. They are ind
 4. **Feature existing products only** marks a promotion rather than a release. **Paused in exported plan** is a draft schedule flag, not an immediate server action. Repeat promotion membership is permitted; more than one release window per product blocks export, including paused windows.
 5. **Next week** / **Next fortnight** copies dates into a new wave with a fresh ID and no products. Populate it deliberately; existing waves are unchanged. Remove products or delete waves with Undo support.
 6. Enter a **Preview local date** to view wave status at that instant, or leave it blank for now. This is a local simulation, not a live storefront query. Validate before exporting.
-7. **Save drafts** preserves project assets. **Export JSON** writes `release-waves.json`, a versioned DLC Pump schedule document, not a direct PlayFab request. It contains stable schedule/wave IDs, purpose, pause state, UTC windows and product IDs. Unassigned products remain unchanged and existing owners retain access by contract; the game must implement that contract before consuming these schedules.
+7. **Save drafts** preserves project assets. **Export JSON** writes `release-waves.json`, a versioned DLC Pump schedule document, not a direct PlayFab request. It contains stable schedule/wave IDs, purpose, pause state, UTC windows and product IDs. Unassigned products remain unchanged. Deploy the updated ownership-safe game client before publishing availability dates.
 
 ### Icon Studio
 
@@ -24,9 +24,9 @@ Open **Release Waves** or **Icon Studio** from the DLC Pump header. They are ind
 4. Choose a layer and tool. Pencil/eraser, fill, eyedropper, line/rectangle, mirror, grid, zoom and palette are available. Drag **Select**, then **Move** to relocate the selected pixels; pixels moved outside the canvas are clipped. Layers can be renamed, hidden, reordered, added or deleted. Undo/Redo applies to document edits and strokes.
 5. Inspect the 64/128-pixel previews. **Save draft** preserves layers and product association. **Export PNG** writes the composited transparent image at source size.
 6. **Assign to product** requires a project adapter implementing `IDlcIconAuthoring.IconAssetPath(productId)`. It validates the catalog ID, saves/imports the PNG at the adapter's path, configures alpha and sampling, and records the assignment. Existing files require replacement confirmation and receive a timestamped backup in the adapter's backup directory. Pixel Undo does not revert exported files; restore a backup if needed.
-7. In TSW the adapter targets `Assets/Resources/StoreIcons/{productId}.png`, compatible with the existing loader. Restart Play mode to refresh its session cache. No runtime loader change or remote icon upload is included.
+7. In TSW the adapter targets `Assets/Resources/StoreIcons/{productId}.png` for the local fallback. Restart Play mode after replacing that bundled file. Use **Review PlayFab upload…** to publish a remote thumbnail separately; the updated game loads remote artwork asynchronously.
 
-Store icons, detail artwork, and Apple review screenshots are separate assets. Icon Studio does not replace the existing 1179 x 2556 Apple screenshot export. Future PlayFab delivery, ownership-safe availability, rendered detail images, and recurring store rotations are separate integration work.
+Store icons, detail artwork, and Apple review screenshots are separate assets. Icon Studio does not replace the existing 1179 x 2556 Apple screenshot export. PlayFab thumbnail delivery and availability publishing are described below. Rendered detail images and recurring whole-store rotations remain separate work.
 
 ## Project integration
 
@@ -76,6 +76,31 @@ Schema references: [PlayFab CreateDraftItem](https://learn.microsoft.com/en-us/r
 
 The existing **Seamless Build** tools remain accessible for Azure/CRC workflows. DLC Pump does not automatically publish, promote, or roll back a live catalog. Keep the previous known-good catalog, referenced bundles and content-state baselines. Verify staging purchase, restore, account switching, interrupted downloads and supported old clients before publishing.
 
+
+### Connect, review and publish to PlayFab
+
+1. Open **Review PlayFab…** in Release Waves or **Review PlayFab upload…** in Icon Studio. The panel shows the selected schedule and icon; clear either optional field to exclude it. You can also use **Build Utility > DLC PlayFab Review**.
+2. Choose **New connection**, save outside Resources, and give it a clear environment name such as Test. Enter the PlayFab **title ID**. Connection assets contain configuration only.
+3. A developer sets the title secret in the operating system environment variable named by **Secret Environment Variable** (default `DLC_PUMP_PLAYFAB_SECRET`), then restarts Unity so it inherits that variable. Enter the variable name in the panel, never the secret. Keep secrets out of source control, screenshots and receipts. The tool exchanges it for an in-memory title entity token.
+4. For availability waves, deploy this updated client to all supported players before checking **Ownership Safe Client Deployed**. This checkbox is an operator confirmation, not a deployment detector; it cannot protect older clients. Start with a test title and verify purchase/restore/account switching there.
+5. Click **Read & review PlayFab changes**. This authenticates and reads only. Existing published Economy v2 items must have `FriendlyId` matching the Unity product ID. Missing items, unrelated unpublished drafts, conflicting schedule ownership, or oversized display properties block review. Item creation remains the platform-catalog export workflow.
+6. Inspect the environment, title, product IDs, old/new dates, visibility, promotions and thumbnail hash. Existing prices, localizations and other artwork are preserved. Changing local inputs invalidates the review.
+7. Choose **Publish reviewed changes…**, confirm the displayed destination, and choose a JSON receipt location. The tool checks each item's ETag again, uploads any changed thumbnail, updates and publishes the draft, polls publish status, and reads the published item back using `GetItems`. An item is marked verified only when the expected fields match. Publication is per item, not an all-or-nothing transaction.
+8. A failure or cancellation may leave a submitted request running remotely. Inspect PlayFab and the receipt, resolve pending drafts there, then review again. The tool stops at the first failure and does not automatically retry writes. Previously verified items remain published. Do not blindly replay a failed receipt.
+
+A release wave sets the catalog start date, optional end date and hidden flag (paused means hidden). Dates are stored remotely, so Unity need not remain open. A promotion writes scheduling metadata without changing purchase dates or visibility; the updated store sorts currently featured offers first. A product can have one availability window and multiple promotions. Removing a product from the local schedule does not automatically undo its remote dates: explicitly review the desired dates/visibility before removing it. Switching schedule ownership also requires deliberate remote reconciliation.
+
+This controls in-game offer discovery and the game's purchase preflight. It does not activate or deactivate Apple/Google products, schedule marketplace promotions, or add a server-side purchase authorization boundary. Existing receipt validation and granting remain unchanged, including delayed valid receipts. Store products must still be configured and approved in their marketplaces.
+
+### What the updated game does
+
+- **Owned inventory:** inventory IDs and amounts are resolved independently of shop search. Hidden or expired products retain owned entries. Missing metadata retains the inventory ID; cached metadata supplies labels and mappings, never ownership. Same-account authoritative inventory remains visible during a failed refresh. A fresh login still needs authenticated inventory; this is not a new offline entitlement system.
+- **Offer visibility:** unowned non-consumables need an available PlayFab item mapped by FriendlyId; unmapped items are withheld. Consumables retain their existing flow. Available offers refresh while the store is open (about every minute and on resume), expire locally at their end time, and become unavailable for purchase if the last successful refresh is older than three minutes. Non-consumable purchases also perform a fresh lookup before initiating marketplace checkout.
+- **Remote artwork:** the first PlayFab Thumbnail supplies the icon; the first Screenshot supplies the item-detail image. HTTPS PNGs up to 4 MiB and 2048 x 2048 pixels are downloaded asynchronously. Local Resources icons remain the fallback. The disk cache retains at most 64 PNG files; account changes reset the in-memory selection. Unchanged URLs reuse cached images, so publish a new image URL to update artwork. Missing or unsupported remote artwork does not block the store.
+- **Pixel sampling:** Icon Studio publishes its pixel-art flag with the thumbnail. Pixel icons use point sampling; smooth headshots use bilinear sampling. Upload replaces only the Thumbnail and preserves existing Screenshot images. Icon Studio does not render or upload a separate description image in this version.
+
+API references: [catalog ETags](https://learn.microsoft.com/en-us/xbox/playfab/economy-monetization/economy-v2/catalog/etags), [PublishDraftItem](https://learn.microsoft.com/en-us/rest/api/playfab/economy/catalog/publish-draft-item?view=playfab-rest), [GetItems](https://learn.microsoft.com/en-us/rest/api/playfab/economy/catalog/get-items?view=playfab-rest), [CreateUploadUrls](https://learn.microsoft.com/en-us/rest/api/playfab/economy/catalog/create-upload-urls?view=playfab-rest).
+
 ## Validation
 
 ## Publish to staging
@@ -91,3 +116,5 @@ TSW includes a free local emulator setup under `Tools/DlcStaging`. Run `npm ci -
 ## Test coverage
 
 Package EditMode tests are in Tests/Editor. TSW's adapter also provides an editor integration test for real content discovery, serialized references and Undo/Redo. Source compilation and pure regression tests are separate from a live Addressables build or store verification.
+
+The TSW checkout includes `Tools/StoryAudit/validate-dlc-liveops.py --unity <Unity.exe>` for offline publishing and inventory-rule tests. It creates an isolated project under Library, uses the installed PlayFab SDK and the production inventory DTO, and calls no live APIs. The full artist/export suite additionally covers native image output, serialization, Undo and panel construction. These checks do not replace staging purchase, restore, account-switching or remote-network testing.
