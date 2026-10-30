@@ -2,6 +2,32 @@
 
 Open **Build Utility > DLC Pump**. DLC Pump manages local DLC release definitions and build evidence. Its window uses the Arbelos water-pump icon.
 
+## Artist workspace (1.0.57)
+
+Open **Release Waves** or **Icon Studio** from the DLC Pump header. They are independent dockable editor windows; no content build or selected release is required. Both have **Help** buttons. This version implements local artist authoring and export. It does not connect to PlayFab or change Apple/Google availability. The later live integration must separate owned inventory from visible offers before applying availability dates.
+
+### Release Waves
+
+1. Choose **New schedule** and save the asset outside Resources. Use **New wave** to create a named group.
+2. Enter start and optional end in `YYYY-MM-DD HH:mm`. Blank end means stays available. Choose a time zone with **Choose zone**; exported timestamps are UTC. Skipped/repeated daylight-saving times are rejected.
+3. Drag products from the product shelf into the selected wave. Alternatively select checkboxes and **Add selected to wave**, or use each product's **+**. Project-window drops accept `DlcRelease` assets and add their known product IDs; arbitrary art assets are rejected. Search matches ID or title.
+4. **Feature existing products only** marks a promotion rather than a release. **Paused in exported plan** is a draft schedule flag, not an immediate server action. Repeat promotion membership is permitted; more than one release window per product blocks export, including paused windows.
+5. **Next week** / **Next fortnight** copies dates into a new wave with a fresh ID and no products. Populate it deliberately; existing waves are unchanged. Remove products or delete waves with Undo support.
+6. Enter a **Preview local date** to view wave status at that instant, or leave it blank for now. This is a local simulation, not a live storefront query. Validate before exporting.
+7. **Save drafts** preserves project assets. **Export JSON** writes `release-waves.json`, a versioned DLC Pump schedule document, not a direct PlayFab request. It contains stable schedule/wave IDs, purpose, pause state, UTC windows and product IDs. Unassigned products remain unchanged and existing owners retain access by contract; the game must implement that contract before consuming these schedules.
+
+### Icon Studio
+
+1. Use **Icon** beside a product in Release Waves. An existing matching icon document is opened when available; otherwise choose a size and **New**. Save editable documents outside Resources. You can also open Icon Studio directly and enter a catalog product ID.
+2. Pixel presets are 32/64/128; 256/512 can be used for headshots. The size selector applies to new documents. Existing source pixels are never silently resized. Enable **Smooth headshot** before importing photos; pixel artwork uses nearest-neighbor sampling.
+3. The original default library includes arena/ring, wrestler silhouette, outfit, taunt, prop, bundle, frame and badge templates. Each adds an independent layer in the current paint color. Import PNG/JPEG as a centered, aspect-preserving layer. Originals are untouched.
+4. Choose a layer and tool. Pencil/eraser, fill, eyedropper, line/rectangle, mirror, grid, zoom and palette are available. Drag **Select**, then **Move** to relocate the selected pixels; pixels moved outside the canvas are clipped. Layers can be renamed, hidden, reordered, added or deleted. Undo/Redo applies to document edits and strokes.
+5. Inspect the 64/128-pixel previews. **Save draft** preserves layers and product association. **Export PNG** writes the composited transparent image at source size.
+6. **Assign to product** requires a project adapter implementing `IDlcIconAuthoring.IconAssetPath(productId)`. It validates the catalog ID, saves/imports the PNG at the adapter's path, configures alpha and sampling, and records the assignment. Existing files require replacement confirmation and receive a timestamped backup in the adapter's backup directory. Pixel Undo does not revert exported files; restore a backup if needed.
+7. In TSW the adapter targets `Assets/Resources/StoreIcons/{productId}.png`, compatible with the existing loader. Restart Play mode to refresh its session cache. No runtime loader change or remote icon upload is included.
+
+Store icons, detail artwork, and Apple review screenshots are separate assets. Icon Studio does not replace the existing 1179 x 2556 Apple screenshot export. Future PlayFab delivery, ownership-safe availability, rendered detail images, and recurring store rotations are separate integration work.
+
 ## Project integration
 
 Implement `IDlcProjectAdapter` in the consuming project's Editor assembly. Register an instance in an `[InitializeOnLoad]` static constructor using `DlcProject.Adapter`. The adapter supplies the project's display name, Unity IAP JSON catalog path, backup directory, unlockable catalog object, runtime product-to-asset mapping and content-discovery operation. The package has no dependency on a particular game's wrestler, arena, skin or progression classes.

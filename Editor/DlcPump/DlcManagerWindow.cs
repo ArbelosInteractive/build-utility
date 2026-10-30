@@ -50,6 +50,11 @@ public sealed class DlcManagerWindow : EditorWindow
         EditorGUILayout.HelpBox("Plan and validate local releases. Exporting or building does not publish products or grant ownership.", MessageType.Info);
         using (new EditorGUILayout.HorizontalScope())
         {
+            if (GUILayout.Button("Release Waves")) DlcArtistWindow.Open();
+            if (GUILayout.Button("Icon Studio")) DlcIconStudioWindow.Open();
+        }
+        using (new EditorGUILayout.HorizontalScope())
+        {
             release = (DlcRelease)EditorGUILayout.ObjectField("Release", release, typeof(DlcRelease), false);
             if (GUILayout.Button("New", GUILayout.Width(65))) CreateRelease();
         }

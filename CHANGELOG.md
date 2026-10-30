@@ -6,6 +6,13 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Released]
 
+## [1.0.57] - 2026-10-30
+### Added
+- Dockable Release Waves workspace: product shelf, drag/drop and multi-selection, saved schedule assets, time-zone/DST validation, local date preview, cadence copies, and deterministic JSON export. Export remains local; it does not schedule live services.
+- Icon Studio: original category templates, layered pixel documents, pencil/eraser/fill/eyedropper/line/rectangle, selection and move, mirror, grid/zoom, import, Undo/Redo, store-size previews, and transparent PNG export.
+- Optional IDlcIconAuthoring adapter for project-specific local icon assignment, with backups before replacement. Editable icon documents remain separate from exported PNGs and Apple review screenshots.
+- Artist-tool model, image, serialization/Undo, and native window construction tests, plus in-editor Help and usage instructions.
+
 ## [1.0.56] - 2026-10-25
 ### Added
 - Per-product Apple 00-pricepoint.json with the configured base territory and customer price, linked from the price-point lookup request.
