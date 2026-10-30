@@ -1,5 +1,12 @@
 # Changelog
 
+## [1.0.59] - 2026-10-30
+
+- Accept PlayFab's published FriendlyId projection without treating it as an unrelated draft edit.
+- Compare equivalent UTC date values and absent end dates consistently during review, repeat publication and verification.
+- Match signed draft image URLs to their published PlayFab CDN content identity while still rejecting changed images.
+- Verify staging icon publication, duplicate-upload avoidance, pause and resume against the live staging title; add focused regressions.
+
 ## [1.0.58] - 2026-10-30
 
 - Add an explicit PlayFab review/publish panel for availability waves, promotions and Icon Studio thumbnails on existing Economy v2 items.

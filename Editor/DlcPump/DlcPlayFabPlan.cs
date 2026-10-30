@@ -21,10 +21,37 @@ public static class DlcPlayFabPlan
     public static JObject Editable(JObject item)
     {
         var copy = (JObject)item.DeepClone();
-        foreach (string key in new[] { "CreationDate", "LastModifiedDate", "Moderation", "Rating", "CreatorEntity" }) copy.Remove(key);
+        foreach (string key in new[] { "CreationDate", "LastModifiedDate", "Moderation", "Rating", "CreatorEntity", "FriendlyId" }) copy.Remove(key);
         return copy;
     }
-    static JObject Comparable(JObject item) { var copy = Editable(item); copy.Remove("ETag"); return copy; }
+    static JToken ComparableImages(JToken value)
+    {
+        var copy = value?.DeepClone();
+        if (copy is JArray images) foreach (var image in images.OfType<JObject>())
+        {
+            if (Uri.TryCreate((string)image["Url"], UriKind.Absolute, out var uri) && uri.Scheme == "https" &&
+                System.Text.RegularExpressions.Regex.IsMatch(uri.Host, @"^(pfcatalogcontent\d+\.blob\.core\.windows\.net|content\d+\.prod\.catalog\.playfab\.com)$"))
+                image["Url"] = "playfab-content:" + uri.AbsolutePath;
+        }
+        return copy;
+    }
+    static bool TryUtc(JToken value, out DateTime utc)
+    {
+        if (value?.Type == JTokenType.Date) { utc = value.Value<DateTime>().ToUniversalTime(); return true; }
+        return DateTime.TryParse((string)value, System.Globalization.CultureInfo.InvariantCulture,
+            System.Globalization.DateTimeStyles.AssumeUniversal | System.Globalization.DateTimeStyles.AdjustToUniversal, out utc);
+    }
+    static JObject Comparable(JObject item)
+    {
+        var copy = Editable(item); copy.Remove("ETag");
+        if (copy["Images"] != null) copy["Images"] = ComparableImages(copy["Images"]);
+        foreach (string field in new[] { "StartDate", "EndDate" })
+        {
+            if (copy[field] == null || copy[field].Type == JTokenType.Null) copy.Remove(field);
+            else if (TryUtc(copy[field], out var utc)) copy[field] = utc.ToString("O", System.Globalization.CultureInfo.InvariantCulture);
+        }
+        return copy;
+    }
     public static JObject Apply(JObject existing, string productId, JObject schedule)
     {
         var item = Editable(existing);
@@ -72,7 +99,8 @@ public static class DlcPlayFabPlan
     public static JObject Summary(DlcPlayFabChange change)
     {
         var differences = new JObject();
-        foreach (var property in change.after.Properties()) if (property.Name != "ETag" && !JToken.DeepEquals(change.before[property.Name], property.Value)) differences[property.Name] = new JObject { ["before"] = change.before[property.Name]?.DeepClone(), ["after"] = property.Value.DeepClone() };
+        var before = Comparable(change.before); var after = Comparable(change.after);
+        foreach (var property in after.Properties()) if (!JToken.DeepEquals(before[property.Name], property.Value)) differences[property.Name] = new JObject { ["before"] = before[property.Name]?.DeepClone(), ["after"] = property.Value.DeepClone() };
         return new JObject { ["productId"] = change.productId, ["itemId"] = change.before["Id"].DeepClone(), ["changes"] = differences, ["uploadThumbnail"] = change.png != null, ["thumbnailSha256"] = change.imageHash };
     }
     public static async Task Publish(IDlcPlayFabTransport api, DlcPlayFabChange change, CancellationToken cancel)
@@ -115,7 +143,8 @@ public static class DlcPlayFabPlan
             // Dates returned by JSON.NET may be parsed as dates; compare normalized representations.
             var expected = updated[field]; var actual = readback[field];
             if ((expected == null || expected.Type == JTokenType.Null) && (actual == null || actual.Type == JTokenType.Null)) continue;
-            if (field.EndsWith("Date") && DateTime.TryParse((string)expected, out var a) && DateTime.TryParse((string)actual, out var b) && a.ToUniversalTime() == b.ToUniversalTime()) continue;
+            if (field.EndsWith("Date") && TryUtc(expected, out var a) && TryUtc(actual, out var b) && a == b) continue;
+            if (field == "Images" && JToken.DeepEquals(ComparableImages(expected), ComparableImages(actual))) continue;
             if (!JToken.DeepEquals(expected, actual)) throw new InvalidOperationException("Read-back mismatch for " + change.productId + " / " + field + ". Review again.");
         }
         change.verified = true;
