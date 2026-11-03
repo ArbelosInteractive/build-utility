@@ -32,6 +32,20 @@ public static class DlcStoreCatalogExport
         return new JObject { ["releaseId"] = releaseId, ["products"] = configured };
     }
 
+    /// <summary>Catalog entries for these product IDs, in the manifest shape AddMissingProducts expects.</summary>
+    public static JObject ManifestFor(JObject catalog, IEnumerable<string> productIds, string releaseId)
+    {
+        var products = Products(catalog).ToArray();
+        var selected = new JArray();
+        foreach (string id in productIds)
+        {
+            var found = products.Where(p => (string)p["id"] == id).ToArray();
+            if (found.Length != 1) throw new InvalidOperationException("Catalog product must resolve uniquely: " + id);
+            selected.Add(found[0].DeepClone());
+        }
+        return new JObject { ["releaseId"] = releaseId, ["products"] = selected };
+    }
+
     public static void AddMissingProducts(JObject manifest, DlcStoreExportOptions options)
     {
         foreach (var p in Products(manifest))

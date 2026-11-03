@@ -6,8 +6,6 @@ using UnityEngine;
 // Editor-only release planning data. Runtime entitlement rules remain authoritative.
 public sealed class DlcRelease : ScriptableObject
 {
-    public DlcPublishingSettings publishingSettings;
-    public DlcStoreExportSettings storeExportSettings;
     public string releaseId = "new-release";
     public string minimumClientVersion = "";
     public BuildTarget target = BuildTarget.Android;

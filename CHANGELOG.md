@@ -1,5 +1,16 @@
 # Changelog
 
+## [1.0.60] - 2026-11-03
+
+- Add DLC content export: one product.json per product, listing each product's real Addressables addresses (content entries with a blank addressablesKey are local content and ignored; products with no keys are still published with an empty key list, so products.json lists everything in the store for that app version), validated against the Addressables settings and the built remote catalog, with a dry run.
+- Add Tools~/DlcPublisher/publish_dlc.py: publishes bundles, the per-app-version catalog, immutable v<N>/product.json and products.json (ETag If-Match) to <Platform>/<appVersion>/, signed in as the Azure CLI user; dry run, product subset, rollback and status, with a log per run. It refuses a full rebuild of a published app version (a catalog with a different name) unless --allow-new-catalog is given.
+- Add runtime DlcContentService and DlcRemoteConfig: products.json/product.json download with ETag caching and offline fallback, minimum client version check, key check against the loaded catalog with one catalog update retry.
+- Add the Build Utility > DLC Publish window: choose publishing settings and a releases folder, list and check releases, validate/export, publish (dry run, checked products only), status and rollback, plus Sign in to Azure / Check again / Sign out (Azure CLI; optional azureTenant) with a container access check (`publish_dlc.py check`).
+- DlcPublishingSettings now holds only the account, container, CDN base URL, access mode, staging folder and Python path. Documented in Documentation~/DLC-CONTENT.md.
+- Add the Build Utility > DLC Store Export window (store export settings and releases folder chosen in the window, add missing products from checked releases, validate, export). The DLC Pump Stores tab keeps store-readiness checks and links to it.
+### Removed
+- The DLC Pump Publish tab, DlcPublisher and Tools~/DlcPublisher/publish.mjs (Node upload with a storage key), DlcRelease.publishingSettings and DlcRelease.storeExportSettings.
+
 ## [1.0.59] - 2026-10-30
 
 - Accept PlayFab's published FriendlyId projection without treating it as an unrelated draft edit.

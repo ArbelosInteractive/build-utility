@@ -20,7 +20,6 @@ public sealed class DlcManagerWindow : EditorWindow
     string editingProduct, productTitle, productDescription, catalogHash;
     string previousContentState = "";
     string packId = "dlc_bundle_", packTitle = "", packDescription = "";
-    string publishManifest = "", publishBuildReceipt = "", publishInventory = "", publishOutput = "";
 
     const string IconPath = "Packages/com.arbelos.buildutility/Editor/DlcPump/DlcPumpIcon.png";
 
@@ -52,13 +51,15 @@ public sealed class DlcManagerWindow : EditorWindow
         {
             if (GUILayout.Button("Release Waves")) DlcArtistWindow.Open();
             if (GUILayout.Button("Icon Studio")) DlcIconStudioWindow.Open();
+            if (GUILayout.Button("DLC Publish")) DlcPublishWindow.Open();
+            if (GUILayout.Button("Store Exports")) DlcStoreExportWindow.Open();
         }
         using (new EditorGUILayout.HorizontalScope())
         {
             release = (DlcRelease)EditorGUILayout.ObjectField("Release", release, typeof(DlcRelease), false);
             if (GUILayout.Button("New", GUILayout.Width(65))) CreateRelease();
         }
-        tab = GUILayout.Toolbar(tab, new[] { "Release", "Products", "Content", "Validate", "Build", "Stores", "Publish" });
+        tab = GUILayout.Toolbar(Mathf.Clamp(tab, 0, 5), new[] { "Release", "Products", "Content", "Validate", "Build", "Stores" });
         scroll = EditorGUILayout.BeginScrollView(scroll);
         using (new EditorGUI.DisabledScope(building || EditorApplication.isPlayingOrWillChangePlaymode || EditorApplication.isCompiling))
         {
@@ -75,7 +76,6 @@ public sealed class DlcManagerWindow : EditorWindow
                         case 3: DrawValidation(); break;
                         case 4: DrawBuild(); break;
                         case 5: DrawStores(); break;
-                        case 6: DrawPublishing(); break;
                     }
                 }
                 catch (Exception error) { report = error.Message; EditorGUILayout.HelpBox(report, MessageType.Error); }
@@ -104,7 +104,7 @@ public sealed class DlcManagerWindow : EditorWindow
     {
         var serialized = new SerializedObject(release);
         serialized.Update();
-        foreach (string field in new[] { "releaseId", "minimumClientVersion", "target", "addressablesProfile", "notes", "publishingSettings" })
+        foreach (string field in new[] { "releaseId", "minimumClientVersion", "target", "addressablesProfile", "notes" })
             EditorGUILayout.PropertyField(serialized.FindProperty(field), true);
         serialized.ApplyModifiedProperties();
         if (GUILayout.Button("Save release")) AssetDatabase.SaveAssets();
@@ -224,7 +224,6 @@ public sealed class DlcManagerWindow : EditorWindow
 
     void DrawStores()
     {
-        DrawStoreCatalogExport();
         EditorGUILayout.HelpBox("Export requirements for PlayFab and the platform stores. Compare with a normalized snapshot exported from the intended environment. This does not publish listings or certify live purchase/restore tests.", MessageType.Info);
         if (GUILayout.Button("Export store-registration requirements"))
         {
@@ -239,80 +238,6 @@ public sealed class DlcManagerWindow : EditorWindow
                 DlcStoreReadiness.Requirements(DlcReleaseService.Snapshot(release)), JObject.Parse(File.ReadAllText(path)));
         }
         EditorGUILayout.TextArea(report, GUILayout.MinHeight(220));
-    }
-
-    JObject SelectedStoreProducts()
-    {
-        var products = (JArray)DlcReleaseService.Catalog()["products"];
-        if (products == null) throw new InvalidOperationException("IAP catalog has no products.");
-        var selected = new JArray();
-        foreach (string id in release.productIds)
-        {
-            var found = products.Where(p => (string)p["id"] == id).ToArray();
-            if (found.Length != 1) throw new InvalidOperationException("Catalog product must resolve uniquely: " + id);
-            selected.Add(found[0].DeepClone());
-        }
-        return new JObject { ["releaseId"] = release.releaseId, ["products"] = selected };
-    }
-
-    void DrawStoreCatalogExport()
-    {
-        EditorGUILayout.LabelField("Platform API catalog exports", EditorStyles.boldLabel);
-        EditorGUILayout.HelpBox("Export JSON for every product listed in these export settings, independently of the release's product selection. Required inputs must be complete for all configured products. Apple response IDs are resolved manually in the documented request sequence. Exporting requires no content build and sends no API requests.", MessageType.Info);
-        var serialized = new SerializedObject(release);
-        serialized.Update();
-        EditorGUILayout.PropertyField(serialized.FindProperty("storeExportSettings"));
-        serialized.ApplyModifiedProperties();
-        if (!release.storeExportSettings)
-        {
-            if (GUILayout.Button("Create store export settings"))
-            {
-                string path = EditorUtility.SaveFilePanelInProject("Store export settings", "DLC Store Export Settings", "asset", "Save in an Editor folder.");
-                if (!string.IsNullOrEmpty(path))
-                {
-                    if (path.Split('/').Contains("Resources")) throw new InvalidOperationException("Store export settings must be outside Resources.");
-                    var settings = CreateInstance<DlcStoreExportSettings>();
-                    AssetDatabase.CreateAsset(settings, path);
-                    Undo.RecordObject(release, "Assign store export settings");
-                    release.storeExportSettings = settings;
-                    EditorUtility.SetDirty(release);
-                }
-            }
-            return;
-        }
-        var settingsObject = new SerializedObject(release.storeExportSettings);
-        settingsObject.Update();
-        EditorGUILayout.PropertyField(settingsObject.FindProperty("options"), true);
-        settingsObject.ApplyModifiedProperties();
-        EditorGUILayout.LabelField("Export scope", "All " + (release.storeExportSettings.options?.products?.Count ?? 0) + " products in export settings");
-        if (GUILayout.Button("Add missing selected products to export settings"))
-        {
-            Undo.RecordObject(release.storeExportSettings, "Add store export products");
-            DlcStoreCatalogExport.AddMissingProducts(SelectedStoreProducts(), release.storeExportSettings.options);
-            EditorUtility.SetDirty(release.storeExportSettings);
-            report = "Added missing selected products without replacing existing settings. Fill locales, prices, territories and application IDs.";
-        }
-        if (GUILayout.Button("Validate platform catalog export"))
-        {
-            var manifest = DlcStoreCatalogExport.ConfiguredProducts(DlcReleaseService.Catalog(), release.storeExportSettings.options, release.releaseId);
-            var errors = DlcStoreCatalogExport.Validate(manifest, release.storeExportSettings.options);
-            report = errors.Count == 0 ? "PASS: Required export inputs are complete. Apple response bindings are resolved during manual submission." : string.Join("\n", errors);
-        }
-        if (GUILayout.Button("Export platform catalogs (JSON)"))
-        {
-            var manifest = DlcStoreCatalogExport.ConfiguredProducts(DlcReleaseService.Catalog(), release.storeExportSettings.options, release.releaseId);
-            var errors = DlcStoreCatalogExport.Validate(manifest, release.storeExportSettings.options);
-            if (errors.Count > 0) { report = "Export blocked:\n" + string.Join("\n", errors); return; }
-            string parent = EditorUtility.OpenFolderPanel("Choose parent for a new store export folder", "", "");
-            if (!string.IsNullOrEmpty(parent))
-            {
-                AssetDatabase.SaveAssets();
-                string output = DlcStoreCatalogExport.Export(manifest, release.storeExportSettings.options, parent);
-                report = "Exported all " + ((JArray)manifest["products"]).Count + " configured products, ordered requests, validation report and instructions to " + output;
-                EditorUtility.RevealInFinder(output);
-            }
-        }
-        EditorGUILayout.Space();
     }
 
     void DrawBuild()
@@ -366,72 +291,6 @@ public sealed class DlcManagerWindow : EditorWindow
             }
         }
         EditorGUILayout.TextArea(report, GUILayout.MinHeight(150));
-    }
-
-    void DrawPublishing()
-    {
-        var serialized = new SerializedObject(release);
-        serialized.Update();
-        EditorGUILayout.PropertyField(serialized.FindProperty("publishingSettings"));
-        serialized.ApplyModifiedProperties();
-        if (!release.publishingSettings)
-        {
-            if (GUILayout.Button("Create publishing settings"))
-            {
-                string path = EditorUtility.SaveFilePanelInProject("Publishing settings", "DLC Publishing Settings", "asset", "Save in an Editor folder.");
-                if (!string.IsNullOrEmpty(path))
-                {
-                    if (path.Split('/').Contains("Resources")) throw new InvalidOperationException("Publishing settings must be outside Resources.");
-                    var settings = CreateInstance<DlcPublishingSettings>();
-                    AssetDatabase.CreateAsset(settings, path);
-                    Undo.RecordObject(release, "Assign publishing settings");
-                    release.publishingSettings = settings; EditorUtility.SetDirty(release);
-                }
-            }
-            return;
-        }
-        var config = new SerializedObject(release.publishingSettings);
-        config.Update();
-        var property = config.GetIterator();
-        bool children = true;
-        while (property.NextVisible(children)) { children = false; if (property.name != "m_Script") EditorGUILayout.PropertyField(property, true); }
-        config.ApplyModifiedProperties();
-        EditorGUILayout.HelpBox("Uploads to the configured container under prefix/release ID, verifies every remote file by downloading and hashing it, and writes a receipt. Existing files are never overwritten. Use a new release ID for changed artifacts. Addressables remote load paths must match this destination. PlayFab fields identify your environment; store purchases are not published by this action.", MessageType.Info);
-        PublishFile("Manifest", ref publishManifest);
-        PublishFile("Build receipt", ref publishBuildReceipt);
-        PublishFile("Artifact inventory", ref publishInventory);
-        using (new EditorGUILayout.HorizontalScope())
-        {
-            publishOutput = EditorGUILayout.TextField("Built output directory", publishOutput);
-            if (GUILayout.Button("Browse", GUILayout.Width(65))) { string path = EditorUtility.OpenFolderPanel("Built output", "", ""); if (!string.IsNullOrEmpty(path)) publishOutput = path; }
-        }
-        if (GUILayout.Button("Upload and verify release files")) StartPublishing("publish");
-        if (GUILayout.Button("Verify remote release files")) StartPublishing("verify");
-        EditorGUILayout.TextArea(report, GUILayout.MinHeight(100));
-    }
-
-    static void PublishFile(string label, ref string value)
-    {
-        using (new EditorGUILayout.HorizontalScope())
-        {
-            value = EditorGUILayout.TextField(label, value);
-            if (GUILayout.Button("Browse", GUILayout.Width(65))) { string path = EditorUtility.OpenFilePanel(label, "", "json"); if (!string.IsNullOrEmpty(path)) value = path; }
-        }
-    }
-
-    async void StartPublishing(string action)
-    {
-        try
-        {
-            if ((string)JObject.Parse(File.ReadAllText(publishManifest))["releaseId"] != release.releaseId) throw new InvalidOperationException("Manifest does not belong to the selected release.");
-            string receipt = EditorUtility.SaveFilePanel("New remote verification receipt", "", release.releaseId + "-" + DateTime.UtcNow.ToString("yyyyMMddTHHmmssfffZ") + ".remote.json", "json");
-            if (string.IsNullOrEmpty(receipt)) return;
-            building = true;
-            report = "Uploading/verifying configured destination. Store publication remains separate.";
-            report = await DlcPublisher.Run(release.publishingSettings, action, publishManifest, publishBuildReceipt, publishInventory, publishOutput, receipt);
-        }
-        catch (Exception error) { report = error.Message; }
-        finally { building = false; if (this) Repaint(); }
     }
 
     void QueueBuild(bool update)

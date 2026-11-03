@@ -1,19 +1,34 @@
+using Arbelos.BuildUtility.Runtime;
 using UnityEngine;
+using UnityEngine.Serialization;
 
+/// <summary>
+/// Destination for Build Utility > DLC Publish. Holds no secrets: uploads sign in as the current Azure CLI user.
+/// </summary>
 [CreateAssetMenu(menuName = "Build Utility/DLC Publishing Settings")]
 public sealed class DlcPublishingSettings : ScriptableObject
 {
-    public string environment = "local-staging";
-    public bool localEmulator = true;
-    public string azureEndpoint = "http://127.0.0.1:10000/dlcpump";
-    public string azureAccount = "dlcpump";
-    public string azureContainer = "dlc-staging";
-    public string releasePrefix = "releases";
-    public bool publicBlobRead = true;
-    [Tooltip("Environment-variable name only. Never put a storage key in an asset.")]
-    public string keyEnvironmentVariable = "DLC_PUMP_AZURE_KEY";
-    public string playFabTitleId = "";
-    public string playFabEnvironment = "staging";
-    public string nodeExecutable = "node";
-    public string dependenciesDirectory = "Tools/DlcStaging";
+    [Tooltip("Storage account name (the <name> in https://<name>.blob.core.windows.net).")]
+    [FormerlySerializedAs("azureAccount")]
+    public string accountName = "";
+
+    [Tooltip("Blob container holding <Platform>/<appVersion>/... Lowercase letters, digits and hyphens.")]
+    public string container = "dlc-content";
+
+    [Tooltip("Public URL of the container root, normally the CDN, e.g. https://example.azurefd.net/dlc-content. " +
+             "The Addressables Remote.LoadPath must be this + /[BuildTarget]/[UnityEngine.Application.version].")]
+    public string cdnBaseUrl = "";
+
+    [Tooltip("PublicRead: manifests, catalog and bundles are anonymously readable. SignedUrl is reserved for paid bundles; see IDlcUrlSigner.")]
+    public DlcContentAccessMode accessMode = DlcContentAccessMode.PublicRead;
+
+    [Tooltip("Local export folder, relative to the Unity project root. Must be outside Assets.")]
+    public string stagingDirectory = "DlcContentStaging";
+
+    public string pythonExecutable = "python";
+
+    [Tooltip("Optional. Azure tenant ID or domain for Sign in to Azure, needed when your account is a guest in the storage account's tenant.")]
+    public string azureTenant = "";
+
+    public string AccountUrl => "https://" + (accountName ?? "").Trim() + ".blob.core.windows.net";
 }

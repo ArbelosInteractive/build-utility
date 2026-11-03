@@ -56,7 +56,7 @@ Export registration requirements, then compare a normalized store/backend snapsh
 
 ### Export platform API catalogs
 
-In **Stores**, create or assign **Store Export Settings** outside Resources. Enable the desired platforms, then click **Add missing selected products to export settings**. This copies product reference names, text and payout subtypes without changing existing settings. It does not guess locales, prices or currencies. Validation and export use **every product in the export settings list**, independently of the selected release's product selection. The selected release only seeds new settings entries and supplies the release ID. Add products from other releases to the same settings asset to export them together. Removing a settings entry excludes that product. Each configured ID must resolve uniquely in the Unity IAP catalog; missing or incomplete entries block export. Only non-consumable products are supported; a content build is not required.
+Open **Build Utility > DLC Store Export** (or **Store Exports** next to DLC Publish in the DLC Pump header). Select or create a **Store Export Settings** asset outside Resources; it is chosen in the window, not stored on releases. Choose the releases folder, check releases, and click **Add missing products from checked releases** to copy their product reference names, text and payout subtypes into the settings without changing existing entries. It does not guess locales, prices or currencies. Validation and export use **every product in the export settings list**, whichever releases are checked. **Export ID** is written into requests.json; when blank it is the single checked release's ID, or a dated ID. Removing a settings entry excludes that product. Each configured ID must resolve uniquely in the Unity IAP catalog; missing or incomplete entries block export. Only non-consumable products are supported; a content build is not required.
 
 Complete the fields for each enabled platform:
 
@@ -103,15 +103,9 @@ API references: [catalog ETags](https://learn.microsoft.com/en-us/xbox/playfab/e
 
 ## Validation
 
-## Publish to staging
+## Publish
 
-In **Publish**, create a publishing settings asset outside Resources. Its public Inspector fields configure the Azure endpoint, account, container, release prefix, environment, and PlayFab title/environment. PlayFab fields describe the intended destination; they do not register products or verify purchases automatically.
-
-Select the matching manifest, successful build receipt, artifact inventory and output folder. **Upload and verify** publishes into a release-specific prefix, then downloads every file and checks its SHA-256. Existing blobs are never overwritten. **Verify remote** repeats the download verification. Save verification receipts outside the output folder. Store publication remains a separate step.
-
-The publisher requires Node.js and `@azure/storage-blob` installed in the configured dependencies directory. Cloud account keys are read from the named environment variable, never stored in Unity assets. Addressables remote load paths must match the intended published URL before building.
-
-TSW includes a free local emulator setup under `Tools/DlcStaging`. Run `npm ci --prefix Tools/DlcStaging`, then `python Tools/DlcStaging/start-emulator.py` from the project root. Default publishing settings point at this loopback-only emulator. It uses a disposable development key and needs no cloud account. This is development storage, not public hosting for players. Emulator data persists under that directory until removed; restart the script after reboot.
+Publishing lives in its own window, **Build Utility > DLC Publish** (or the **DLC Publish** button in the DLC Pump header). It exports one `product.json` per product from the checked releases, then uploads the export with the per-app-version Addressables catalog and bundles to Azure Blob Storage. See [DLC-CONTENT.md](DLC-CONTENT.md). The earlier Node/storage-key staging publisher has been removed.
 
 ## Test coverage
 

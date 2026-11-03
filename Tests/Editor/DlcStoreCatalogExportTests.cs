@@ -301,7 +301,7 @@ public class DlcStoreCatalogExportTests
 public class DlcStoreExportSerializationTests
 {
     [Test]
-    public void SettingsPersistAndReleaseAssignmentSupportsUndoRedo()
+    public void SettingsPersistAndEditsSupportUndoRedo()
     {
         string folder = "Assets/DlcStoreExportTest_" + Guid.NewGuid().ToString("N");
         UnityEditor.AssetDatabase.CreateFolder("Assets", Path.GetFileName(folder));
@@ -311,30 +311,26 @@ public class DlcStoreExportSerializationTests
             settings.options = DlcStoreCatalogExportTests.Options(DlcStoreCatalogExportTests.Manifest());
             string settingsPath = folder + "/Settings.asset";
             UnityEditor.AssetDatabase.CreateAsset(settings, settingsPath);
-            var release = UnityEngine.ScriptableObject.CreateInstance<DlcRelease>();
-            string releasePath = folder + "/Release.asset";
-            UnityEditor.AssetDatabase.CreateAsset(release, releasePath);
-            UnityEditor.Undo.RecordObject(release, "Assign export settings");
-            release.storeExportSettings = settings;
+            string appId = settings.options.appleAppId;
+            UnityEditor.Undo.RecordObject(settings, "Edit export settings");
+            settings.options.appleAppId = "999";
             UnityEditor.Undo.FlushUndoRecordObjects();
             UnityEditor.Undo.PerformUndo();
-            Assert.IsNull(release.storeExportSettings);
+            Assert.AreEqual(appId, settings.options.appleAppId);
             UnityEditor.Undo.PerformRedo();
-            Assert.AreEqual(settings, release.storeExportSettings);
-            UnityEditor.EditorUtility.SetDirty(release);
+            Assert.AreEqual("999", settings.options.appleAppId);
+            settings.options.appleAppId = appId;
+            UnityEditor.EditorUtility.SetDirty(settings);
             UnityEditor.AssetDatabase.SaveAssets();
             UnityEditor.AssetDatabase.ImportAsset(settingsPath, UnityEditor.ImportAssetOptions.ForceUpdate);
-            UnityEditor.AssetDatabase.ImportAsset(releasePath, UnityEditor.ImportAssetOptions.ForceUpdate);
-            var loaded = UnityEditor.AssetDatabase.LoadAssetAtPath<DlcRelease>(releasePath);
-            Assert.IsNotNull(loaded.storeExportSettings);
-            var options = loaded.storeExportSettings.options;
+            var loadedSettings = UnityEditor.AssetDatabase.LoadAssetAtPath<DlcStoreExportSettings>(settingsPath);
+            Assert.IsNotNull(loadedSettings);
+            var options = loadedSettings.options;
             Assert.AreEqual("1.990000001", options.products[0].googleRegions[0].price);
             Assert.AreEqual("en-US", options.products[0].localizations[0].appleLocale);
             Assert.IsTrue(File.Exists(options.products[0].appleReviewScreenshotPath));
             Assert.IsEmpty(DlcStoreCatalogExport.Validate(DlcStoreCatalogExportTests.Manifest(), options));
-            var serialized = new UnityEditor.SerializedObject(loaded);
-            Assert.IsNotNull(serialized.FindProperty("storeExportSettings"));
-            var serializedSettings = new UnityEditor.SerializedObject(loaded.storeExportSettings);
+            var serializedSettings = new UnityEditor.SerializedObject(loadedSettings);
             Assert.IsNotNull(serializedSettings.FindProperty("options"));
         }
         finally
