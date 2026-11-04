@@ -49,9 +49,8 @@ public sealed class DlcReleaseListView
         checkedGuids.RemoveAll(g => releases.All(r => r.guid != g));
     }
 
-    /// <param name="greyOtherPlatforms">Grey out releases whose target isn't the active build target.</param>
     /// <returns>An error message for the caller's report, or null.</returns>
-    public string Draw(bool greyOtherPlatforms)
+    public string Draw()
     {
         string message = null;
         EditorGUILayout.LabelField("Releases", EditorStyles.boldLabel);
@@ -75,7 +74,6 @@ public sealed class DlcReleaseListView
         }
 
         var visible = Visible().ToList();
-        var active = EditorUserBuildSettings.activeBuildTarget;
         EditorGUILayout.LabelField($"{releases.Count} releases, {visible.Count} shown, {checkedGuids.Count} checked", EditorStyles.miniLabel);
         scroll = EditorGUILayout.BeginScrollView(scroll, EditorStyles.helpBox, GUILayout.MinHeight(180), GUILayout.MaxHeight(320));
         foreach (var (guid, release) in visible)
@@ -85,13 +83,8 @@ public sealed class DlcReleaseListView
                 bool on = checkedGuids.Contains(guid);
                 bool now = EditorGUILayout.Toggle(on, GUILayout.Width(18));
                 if (now != on) { if (now) checkedGuids.Add(guid); else checkedGuids.Remove(guid); }
-                bool other = greyOtherPlatforms && release.target != active;
-                using (new EditorGUI.DisabledScope(other))
-                {
-                    EditorGUILayout.LabelField(new GUIContent(release.releaseId, AssetDatabase.GUIDToAssetPath(guid)), EditorStyles.boldLabel, GUILayout.MinWidth(140));
-                    EditorGUILayout.LabelField(release.target + (other ? " (other platform)" : ""), GUILayout.Width(150));
-                    EditorGUILayout.LabelField($"{release.productIds?.Count ?? 0} products, {release.content?.Count ?? 0} entries", GUILayout.Width(150));
-                }
+                EditorGUILayout.LabelField(new GUIContent(release.releaseId, AssetDatabase.GUIDToAssetPath(guid)), EditorStyles.boldLabel, GUILayout.MinWidth(140));
+                EditorGUILayout.LabelField($"{release.productIds?.Count ?? 0} products, {release.content?.Count ?? 0} entries", GUILayout.Width(150));
                 if (GUILayout.Button("Select", EditorStyles.miniButton, GUILayout.Width(50)))
                 {
                     Selection.activeObject = release;

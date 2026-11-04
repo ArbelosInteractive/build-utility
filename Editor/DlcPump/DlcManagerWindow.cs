@@ -16,9 +16,7 @@ public sealed class DlcManagerWindow : EditorWindow
     [SerializeField] int tab;
     Vector2 scroll;
     string report = "Choose a release, then validate it.";
-    bool building;
     string editingProduct, productTitle, productDescription, catalogHash;
-    string previousContentState = "";
     string packId = "dlc_bundle_", packTitle = "", packDescription = "";
 
     const string IconPath = "Packages/com.arbelos.buildutility/Editor/DlcPump/DlcPumpIcon.png";
@@ -59,9 +57,9 @@ public sealed class DlcManagerWindow : EditorWindow
             release = (DlcRelease)EditorGUILayout.ObjectField("Release", release, typeof(DlcRelease), false);
             if (GUILayout.Button("New", GUILayout.Width(65))) CreateRelease();
         }
-        tab = GUILayout.Toolbar(Mathf.Clamp(tab, 0, 5), new[] { "Release", "Products", "Content", "Validate", "Build", "Stores" });
+        tab = GUILayout.Toolbar(Mathf.Clamp(tab, 0, 4), new[] { "Release", "Products", "Content", "Validate", "Stores" });
         scroll = EditorGUILayout.BeginScrollView(scroll);
-        using (new EditorGUI.DisabledScope(building || EditorApplication.isPlayingOrWillChangePlaymode || EditorApplication.isCompiling))
+        using (new EditorGUI.DisabledScope(EditorApplication.isPlayingOrWillChangePlaymode || EditorApplication.isCompiling))
         {
             if (!release) EditorGUILayout.HelpBox("Create a release asset or select an existing one.", MessageType.Info);
             else
@@ -74,8 +72,7 @@ public sealed class DlcManagerWindow : EditorWindow
                         case 1: DrawProducts(); break;
                         case 2: DrawContent(); break;
                         case 3: DrawValidation(); break;
-                        case 4: DrawBuild(); break;
-                        case 5: DrawStores(); break;
+                        case 4: DrawStores(); break;
                     }
                 }
                 catch (Exception error) { report = error.Message; EditorGUILayout.HelpBox(report, MessageType.Error); }
@@ -90,7 +87,6 @@ public sealed class DlcManagerWindow : EditorWindow
         if (string.IsNullOrEmpty(path)) return;
         if (path.Split('/').Contains("Resources")) { report = "Release assets must be outside Resources."; return; }
         var created = CreateInstance<DlcRelease>();
-        created.target = EditorUserBuildSettings.activeBuildTarget;
         created.minimumClientVersion = PlayerSettings.bundleVersion;
         var settings = AddressableAssetSettingsDefaultObject.Settings;
         if (settings) created.addressablesProfile = settings.profileSettings.GetProfileName(settings.activeProfileId);
@@ -104,7 +100,7 @@ public sealed class DlcManagerWindow : EditorWindow
     {
         var serialized = new SerializedObject(release);
         serialized.Update();
-        foreach (string field in new[] { "releaseId", "minimumClientVersion", "target", "addressablesProfile", "notes" })
+        foreach (string field in new[] { "releaseId", "minimumClientVersion", "addressablesProfile", "notes" })
             EditorGUILayout.PropertyField(serialized.FindProperty(field), true);
         serialized.ApplyModifiedProperties();
         if (GUILayout.Button("Save release")) AssetDatabase.SaveAssets();
@@ -238,141 +234,5 @@ public sealed class DlcManagerWindow : EditorWindow
                 DlcStoreReadiness.Requirements(DlcReleaseService.Snapshot(release)), JObject.Parse(File.ReadAllText(path)));
         }
         EditorGUILayout.TextArea(report, GUILayout.MinHeight(220));
-    }
-
-    void DrawBuild()
-    {
-        EditorGUILayout.HelpBox("Build provider: shared com.arbelos.buildutility package. Project product and unlock configuration remains in this project.", MessageType.Info);
-        if (GUILayout.Button("Open shared build / update / Azure upload tools"))
-            if (!EditorApplication.ExecuteMenuItem("Build Utility/Seamless Build"))
-                report = "Shared build utility menu is unavailable. Check com.arbelos.buildutility installation.";
-        EditorGUILayout.HelpBox("Builds include all configured Addressables groups, not only this release. For a shipped client, select its original content-state baseline and use UPDATE. The baseline is archived with the receipt; errors never trigger a full-build fallback. Unity can be busy during builds.", MessageType.Warning);
-        using (new EditorGUILayout.HorizontalScope())
-        {
-            previousContentState = EditorGUILayout.TextField("Content-state baseline", previousContentState);
-            if (GUILayout.Button("Browse", GUILayout.Width(70)))
-            {
-                string chosen = EditorUtility.OpenFilePanel("Original shipped client's Addressables content state", "", "bin");
-                if (!string.IsNullOrEmpty(chosen)) previousContentState = chosen;
-            }
-        }
-        if (GUILayout.Button("Build content UPDATE + receipt")) QueueBuild(true);
-        if (GUILayout.Button("Build full Addressables content + receipt"))
-            QueueBuild(false);
-        if (GUILayout.Button("Analyze Addressables build layout"))
-        {
-            string path = EditorUtility.OpenFilePanel("Build layout JSON from this release's build", "Library/com.unity.addressables", "json");
-            if (!string.IsNullOrEmpty(path)) report = DlcBuildLayoutReport.Analyze(path, DlcReleaseService.Snapshot(release)).ToString();
-        }
-        if (GUILayout.Button("Record built artifact sizes and checksums"))
-        {
-            string folder = EditorUtility.OpenFolderPanel("Select built output directory", "", "");
-            if (!string.IsNullOrEmpty(folder))
-            {
-                var inventory = DlcArtifactInventory.Capture(folder);
-                inventory["releaseId"] = release.releaseId;
-                string destination = EditorUtility.SaveFilePanel("Save inventory outside the output directory", "", release.releaseId + ".artifacts.json", "json");
-                if (!string.IsNullOrEmpty(destination))
-                {
-                    if (Path.GetFullPath(destination).StartsWith(Path.GetFullPath(folder).TrimEnd(Path.DirectorySeparatorChar) + Path.DirectorySeparatorChar, StringComparison.OrdinalIgnoreCase))
-                        throw new InvalidOperationException("Save the inventory outside the directory it inventories.");
-                    DlcReleaseService.WriteNew(destination, inventory.ToString());
-                    report = "Recorded " + ((JArray)inventory["files"]).Count + " built files, " + EditorUtility.FormatBytes((long)inventory["totalBytes"]) + ".";
-                }
-            }
-        }
-        if (GUILayout.Button("Verify built artifacts against inventory"))
-        {
-            string path = EditorUtility.OpenFilePanel("Artifact inventory", "", "json");
-            if (!string.IsNullOrEmpty(path))
-            {
-                string folder = EditorUtility.OpenFolderPanel("Directory to verify", "", "");
-                if (!string.IsNullOrEmpty(folder)) report = DlcArtifactInventory.Verify(JObject.Parse(File.ReadAllText(path)), folder);
-            }
-        }
-        EditorGUILayout.TextArea(report, GUILayout.MinHeight(150));
-    }
-
-    void QueueBuild(bool update)
-        {
-            if (update && (string.IsNullOrWhiteSpace(previousContentState) || !File.Exists(previousContentState)))
-                throw new InvalidOperationException("Select the original shipped client's content-state .bin file. An update never falls back to a full build.");
-            AssetDatabase.SaveAssets();
-            var snapshot = DlcReleaseService.Snapshot(release);
-            var settings = AddressableAssetSettingsDefaultObject.Settings;
-            if (release.target != EditorUserBuildSettings.activeBuildTarget) throw new InvalidOperationException("Switch the active build target first.");
-            if (settings.activeProfileId != settings.profileSettings.GetProfileId(release.addressablesProfile)) throw new InvalidOperationException("Select the release's Addressables profile before building.");
-            string folder = EditorUtility.OpenFolderPanel("Choose build receipt directory", "", "");
-            if (string.IsNullOrEmpty(folder)) return;
-            string receipt = Path.Combine(folder, release.releaseId + "-" + DateTime.UtcNow.ToString("yyyyMMddTHHmmssfffZ") + "-" + Guid.NewGuid().ToString("N").Substring(0, 8));
-            DlcReleaseService.WriteNew(receipt + ".manifest.json", snapshot.ToString());
-            string baseline = update ? Path.GetFullPath(previousContentState) : null;
-            string baselineHash = update ? DlcReleaseService.Hash(File.ReadAllBytes(baseline)) : null;
-            building = true;
-            report = "Build queued. Output paths come from the active Addressables profile.";
-            EditorApplication.delayCall += () => Build(receipt, snapshot, baseline, baselineHash);
-    }
-
-    void Build(string receipt, JObject snapshot, string baseline, string baselineHash)
-    {
-        var result = new JObject { ["releaseId"] = (string)snapshot["releaseId"],
-            ["manifestSha256"] = DlcReleaseService.Hash(Encoding.UTF8.GetBytes(snapshot.ToString())),
-            ["startedUtc"] = DateTime.UtcNow.ToString("O"), ["published"] = false,
-            ["buildKind"] = baseline == null ? "full" : "content-update", ["baselineSha256"] = baselineHash };
-        try
-        {
-            if (EditorApplication.isPlayingOrWillChangePlaymode || EditorApplication.isCompiling)
-                throw new InvalidOperationException("Build cancelled: Editor state changed.");
-            var settings = AddressableAssetSettingsDefaultObject.Settings;
-            if (!settings || EditorUserBuildSettings.activeBuildTarget.ToString() != (string)snapshot["target"] ||
-                settings.profileSettings.GetProfileName(settings.activeProfileId) != (string)snapshot["profile"])
-                throw new InvalidOperationException("Build cancelled: target or profile changed.");
-            if (!release || !JToken.DeepEquals(snapshot, DlcReleaseService.Snapshot(release)))
-                throw new InvalidOperationException("Build cancelled: release or content changed after the snapshot.");
-            if (baseline != null)
-            {
-                if (!File.Exists(baseline) || DlcReleaseService.Hash(File.ReadAllBytes(baseline)) != baselineHash)
-                    throw new InvalidOperationException("Content-state baseline changed since queueing.");
-                // Copy the baseline into this immutable release receipt set. Do not
-                // allow an output cleanup to erase the only shipped-client state.
-                string archivedBaseline = receipt + ".baseline.bin";
-                using (var input = File.OpenRead(baseline))
-                using (var output = new FileStream(archivedBaseline, FileMode.CreateNew)) input.CopyTo(output);
-                var updated = ContentUpdateScript.BuildContentUpdate(settings, archivedBaseline);
-                if (updated == null || !string.IsNullOrEmpty(updated.Error))
-                    throw new InvalidOperationException(updated?.Error ?? "No content-update result.");
-                result["outputPath"] = updated.OutputPath;
-                result["buildProvider"] = "Unity content update with explicit archived baseline";
-            }
-            else
-            {
-            // Reuse the shared package's checked build primitive. Older package
-            // versions must be upgraded rather than silently bypassing it.
-            var provider = AppDomain.CurrentDomain.GetAssemblies()
-                .Select(a => a.GetType("Arbelos.BuildUtility.Editor.CustomAddressableTools"))
-                .FirstOrDefault(t => t != null);
-            var build = provider?.GetMethod("BuildPlayerContentWithResult", System.Reflection.BindingFlags.Public | System.Reflection.BindingFlags.Static,
-                null, Type.EmptyTypes, null);
-            if (build == null) throw new InvalidOperationException("The shared Arbelos build package needs BuildPlayerContentWithResult support. Update com.arbelos.buildutility.");
-            try
-            {
-                var built = (AddressablesPlayerBuildResult)build.Invoke(null, null);
-                result["outputPath"] = built.OutputPath;
-            }
-            catch (System.Reflection.TargetInvocationException error) { throw error.InnerException ?? error; }
-            result["buildProvider"] = "com.arbelos.buildutility / BuildPlayerContentWithResult";
-            }
-            result["success"] = true;
-            report = "Local Addressables build succeeded. Not uploaded or published. Receipt: " + receipt + ".build.json";
-        }
-        catch (Exception error) { result["success"] = false; result["error"] = error.ToString(); report = "Build failed: " + error.Message; }
-        finally
-        {
-            result["finishedUtc"] = DateTime.UtcNow.ToString("O");
-            try { DlcReleaseService.WriteNew(receipt + ".build.json", result.ToString()); }
-            catch (Exception error) { Debug.LogException(error); report += "\nReceipt could not be saved: " + error.Message; }
-            building = false;
-            if (this) Repaint();
-        }
     }
 }

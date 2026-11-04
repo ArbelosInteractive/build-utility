@@ -13,6 +13,9 @@ using UnityEngine;
 
 public static class DlcReleaseService
 {
+    /// <summary>DLC ships to both stores; every release is exported, built and published for the active target, which must be one of these.</summary>
+    public static bool IsStorePlatform(BuildTarget target) => target == BuildTarget.Android || target == BuildTarget.iOS;
+
     public static string CatalogPath => DlcProject.Required.CatalogPath;
     public static JObject Catalog() => JObject.Parse(File.ReadAllText(CatalogPath));
     public static string Hash(byte[] bytes)
@@ -69,7 +72,7 @@ public static class DlcReleaseService
         if (!settings) issues.Add("ERROR: Addressables settings are missing.");
         else if (string.IsNullOrEmpty(settings.profileSettings.GetProfileId(release.addressablesProfile)))
             issues.Add("ERROR: Addressables profile does not exist: " + release.addressablesProfile);
-        if (release.target != EditorUserBuildSettings.activeBuildTarget) issues.Add("WARNING: Switch Unity's active build target to " + release.target + " before building.");
+        if (!IsStorePlatform(EditorUserBuildSettings.activeBuildTarget)) issues.Add("WARNING: The active build target is " + EditorUserBuildSettings.activeBuildTarget + ". Switch to Android or iOS before building; every release builds for both.");
         var entries = settings ? settings.groups.Where(g => g).SelectMany(g => g.entries).ToList() : new List<AddressableAssetEntry>();
         foreach (var item in release.content)
         {
@@ -124,7 +127,7 @@ public static class DlcReleaseService
         foreach (var path in AssetDatabase.GetDependencies(settingsPath, true).Concat(new[] { "Packages/manifest.json", "Packages/packages-lock.json", "ProjectSettings/ProjectVersion.txt" }).Distinct().OrderBy(p => p))
             if (File.Exists(path)) configuration.Add(new JObject { ["path"] = path, ["sha256"] = HashFile(path) });
         return new JObject { ["schemaVersion"] = 1, ["releaseId"] = release.releaseId,
-            ["minimumClientVersion"] = release.minimumClientVersion, ["target"] = release.target.ToString(),
+            ["minimumClientVersion"] = release.minimumClientVersion, ["target"] = EditorUserBuildSettings.activeBuildTarget.ToString(), // the platform this snapshot builds for
             ["profile"] = release.addressablesProfile, ["unityVersion"] = Application.unityVersion,
             ["configuration"] = configuration, ["uniqueSourceBytes"] = dependencyCache.Values.Sum(d => (long)d["sourceBytes"]),
             ["sizeNote"] = "Source bytes only; not compressed download size.",

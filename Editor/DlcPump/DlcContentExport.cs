@@ -8,19 +8,22 @@ using Newtonsoft.Json;
 using Newtonsoft.Json.Linq;
 using UnityEditor;
 using UnityEditor.AddressableAssets;
+using UnityEditor.AddressableAssets.Build;
 using UnityEditor.AddressableAssets.Settings;
 using UnityEngine;
 using UnityEngine.AddressableAssets.ResourceLocators;
 
 public sealed class DlcContentProductDraft
 {
-    public string productId, releaseId, target, minimumClientVersion, notes;
+    public string productId, releaseId, minimumClientVersion, notes;
     public List<string> keys = new List<string>();
 }
 
 public sealed class DlcContentExportResult
 {
     public string platform, appVersion, profileName, remoteLoadPath, buildPath, catalogFile, hashFile, catalogBuild;
+    /// <summary>The full build's addressables_content_state.bin, when it belongs to <see cref="catalogFile"/>; publish stores it once per platform and app version.</summary>
+    public string contentStateFile;
     public List<string> releaseIds = new List<string>();
     public List<DlcContentProductDraft> products = new List<DlcContentProductDraft>();
     public List<string> errors = new List<string>(), warnings = new List<string>();
@@ -36,6 +39,7 @@ public sealed class DlcContentExportResult
         var sb = new StringBuilder();
         sb.AppendLine($"DLC content export for {platform} {appVersion} (profile '{profileName}')");
         sb.AppendLine($"Products: {products.Count}, keys: {products.Sum(p => p.keys.Count)}, catalog: {catalogFile} ({catalogBuild})");
+        if (contentStateFile != null) sb.AppendLine("Content-state baseline: " + contentStateFile);
         if (ignoredEntries > 0) sb.AppendLine($"Ignored {ignoredEntries} content entr{(ignoredEntries == 1 ? "y" : "ies")} with a blank Addressables key (local content).");
         if (localOnlyProducts.Count > 0) sb.AppendLine($"{localOnlyProducts.Count} product(s) have no Addressables keys and are published with an empty key list (nothing to download): " + string.Join(", ", localOnlyProducts));
         foreach (var e in errors) sb.AppendLine("ERROR: " + e);
@@ -67,6 +71,7 @@ public static class DlcContentExport
         if (!settings) { r.errors.Add("No Addressables settings found in this project."); return r; }
 
         ResolveEnvironment(releases, publishing, settings, r);
+        ResolveContentState(settings, r);
         var known = KnownAddresses(settings);
         HashSet<string> catalogKeys = null;
         if (r.catalogFile != null)
@@ -90,9 +95,6 @@ public static class DlcContentExport
         string appVersion, DlcContentExportResult r)
     {
         var owner = new Dictionary<string, string>(StringComparer.Ordinal);
-        var targets = releases.Select(x => x.target).Distinct().ToList();
-        if (targets.Count > 1) r.errors.Add("Selected releases have different targets: " + string.Join(", ", targets) + ". Export one platform at a time.");
-
         foreach (var release in releases)
         {
             string rel = $"Release '{release.releaseId}' ({AssetDatabase.GetAssetPath(release)})";
@@ -136,7 +138,7 @@ public static class DlcContentExport
             {
                 if (kv.Value.Count == 0) r.localOnlyProducts.Add(kv.Key);
                 r.products.Add(new DlcContentProductDraft {
-                    productId = kv.Key, releaseId = release.releaseId, target = release.target.ToString(),
+                    productId = kv.Key, releaseId = release.releaseId,
                     minimumClientVersion = release.minimumClientVersion ?? "", notes = release.notes ?? "",
                     keys = kv.Value.ToList() });
             }
@@ -145,11 +147,12 @@ public static class DlcContentExport
 
     static void ResolveEnvironment(IList<DlcRelease> releases, DlcPublishingSettings publishing, AddressableAssetSettings settings, DlcContentExportResult r)
     {
-        var target = releases[0].target;
+        // Releases cover every store platform; the export is for the editor's active build target.
+        var target = EditorUserBuildSettings.activeBuildTarget;
         r.platform = target.ToString();
         r.appVersion = PlayerSettings.bundleVersion;
-        if (EditorUserBuildSettings.activeBuildTarget != target)
-            r.errors.Add($"Active build target is {EditorUserBuildSettings.activeBuildTarget}, release target is {target}. Switch platform and build Addressables first.");
+        if (!DlcReleaseService.IsStorePlatform(target))
+            r.errors.Add($"Active build target is {target}. DLC is exported for Android or iOS: switch platform and build Addressables first.");
         if (!DlcContentPaths.IsSafeSegment(r.appVersion)) r.errors.Add($"App version '{r.appVersion}' can't be used as a folder name.");
 
         var profiles = releases.Select(x => (x.addressablesProfile ?? "").Trim()).Distinct().ToList();
@@ -182,6 +185,36 @@ public static class DlcContentExport
         r.catalogFile = Path.GetFileName(catalogs[0]);
         r.hashFile = Path.GetFileName(hash);
         r.catalogBuild = File.ReadAllText(hash).Trim();
+    }
+
+    /// <summary>
+    /// Picks the content-state file to store with this export. Only full builds write it, and its playerVersion names
+    /// the catalog (catalog_&lt;playerVersion&gt;), so it is included only when it belongs to the catalog being exported.
+    /// After a content update built from an older baseline, the local file is usually from a later full build; it is
+    /// then left out and the baseline already stored in Azure stays.
+    /// </summary>
+    static void ResolveContentState(AddressableAssetSettings settings, DlcContentExportResult r)
+    {
+        if (r.catalogFile == null) return;
+        string path;
+        try { path = ContentUpdateScript.GetContentStateDataPath(false, settings); }
+        catch (Exception e) { r.warnings.Add("Couldn't find the Addressables content-state file: " + e.Message); return; }
+        if (string.IsNullOrEmpty(path) || path.Contains("://")) { r.warnings.Add($"Content State Build Path '{path}' isn't a local file; the content-state baseline won't be stored."); return; }
+        path = Path.GetFullPath(path);
+        if (!File.Exists(path))
+        {
+            r.warnings.Add($"No content-state file at {path}; the baseline for {r.platform} {r.appVersion} won't be stored. It's written by full Addressables builds.");
+            return;
+        }
+        var state = ContentUpdateScript.LoadContentState(path);
+        string expected = Path.GetFileNameWithoutExtension(r.catalogFile);
+        if (state == null || "catalog_" + state.playerVersion != expected)
+        {
+            r.warnings.Add($"{path} is from another full build (catalog_{state?.playerVersion}), not the one that made {r.catalogFile}, so it won't be stored. " +
+                           "That's expected after a content update; for a full build, export straight after building.");
+            return;
+        }
+        r.contentStateFile = path;
     }
 
     static HashSet<string> KnownAddresses(AddressableAssetSettings settings)
@@ -234,7 +267,7 @@ public static class DlcContentExport
                 ["schemaVersion"] = DlcContentPaths.SchemaVersion, ["productId"] = p.productId,
                 ["version"] = null, // assigned by publish_dlc.py
                 ["platform"] = r.platform, ["appVersion"] = r.appVersion, ["releaseId"] = p.releaseId,
-                ["target"] = p.target, ["minimumClientVersion"] = p.minimumClientVersion,
+                ["minimumClientVersion"] = p.minimumClientVersion,
                 ["keys"] = new JArray(p.keys), ["catalogBuild"] = r.catalogBuild, ["notes"] = p.notes };
             DlcReleaseService.WriteNew(Path.Combine(dir, p.productId, DlcContentPaths.ProductFile), product.ToString(Formatting.Indented));
         }
@@ -244,6 +277,7 @@ public static class DlcContentExport
             ["platform"] = r.platform, ["appVersion"] = r.appVersion, ["addressablesProfile"] = r.profileName,
             ["remoteLoadPath"] = r.remoteLoadPath, ["addressablesBuildPath"] = r.buildPath,
             ["catalogFile"] = r.catalogFile, ["hashFile"] = r.hashFile, ["catalogBuild"] = r.catalogBuild,
+            ["contentStateFile"] = r.contentStateFile,
             ["exportedUtc"] = DateTime.UtcNow.ToString("o"), ["releases"] = new JArray(r.releaseIds),
             ["products"] = new JArray(r.products.Select(p => p.productId)),
             ["localOnlyProducts"] = new JArray(r.localOnlyProducts), ["ignoredLocalEntries"] = r.ignoredEntries };

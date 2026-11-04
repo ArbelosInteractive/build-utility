@@ -7,12 +7,15 @@ Layout in the container (default "dlc-content"):
     <Platform>/<appVersion>/<bundles...>              content-hash names, never overwritten
     <Platform>/<appVersion>/products.json             mutable index, the only file the game reads first
     <Platform>/<appVersion>/<productId>/v<N>/product.json   immutable
+    _build-state/<Platform>/<appVersion>/addressables_content_state.bin   the full build's content-state file,
+                                                      for content updates; not used by the game
 
 Commands:
     publish   upload an export made by Build Utility > DLC Content > Export Selected Releases
     rollback  rewrite products.json to point a product at an earlier version, or drop a version
     status    print products.json for a platform and app version
     check     sign in and confirm the container can be read (writes nothing)
+    baseline  download the stored content-state file for a platform and app version
 
 Publish order (always): bundles -> catalog, then its .hash -> v<N>/product.json -> products.json.
   * A bundle that already exists with the same MD5 is skipped; a different MD5 under the same name fails.
@@ -22,7 +25,20 @@ Publish order (always): bundles -> catalog, then its .hash -> v<N>/product.json 
   * If the app-version folder already has a catalog with a different name (a full rebuild of a published
     version), the run fails before uploading anything. Use a content update, or --allow-new-catalog for a
     version that hasn't shipped.
-  * The first error stops the run. Nothing is ever deleted.
+  * A failed upload is retried a few times. A bundle that still fails doesn't stop the other bundles, but the
+    run stops before the catalog. Any other error stops the run straight away. Nothing is ever deleted.
+
+Content-state baseline: when export.json names the full build's addressables_content_state.bin (the exporter
+only does that when the file belongs to the catalog being published), it is stored once per platform and app
+version during step 2. The same file again is skipped; a different file fails the run before anything is written,
+unless --allow-new-catalog is given (a version that hasn't shipped). Content updates never change it: every update
+of a version is built against the file from the full build players have.
+
+Resuming: run the same publish again. Bundles and catalog files already uploaded are skipped (same MD5), and a
+v<N>/product.json left by the interrupted run (written but not yet listed in products.json) is reused when it
+holds the same draft, so products don't skip version numbers.
+
+--progress prints "@@progress {json}" lines on stdout for the Unity window (not written to the log).
 
 Sign-in: the current Azure CLI user (`az login`), who needs "Storage Blob Data Contributor" on the account.
 Install: pip install azure-identity azure-storage-blob
@@ -37,6 +53,7 @@ import hashlib
 import json
 import re
 import sys
+import time
 from pathlib import Path
 
 SCHEMA_VERSION = 1
@@ -47,6 +64,10 @@ IMMUTABLE = "public, max-age=31536000, immutable"
 SHORT = "public, max-age=60"
 CONTENT_TYPES = {".json": "application/json", ".hash": "text/plain", ".bin": "application/octet-stream",
                  ".bundle": "application/octet-stream"}
+BASELINE_DIR = "_build-state"
+BASELINE_FILE = "addressables_content_state.bin"
+RETRY_DELAYS = (3, 10)  # seconds before the 2nd and 3rd attempt of a failed upload; tests set these to 0
+PUBLISH_STEPS = 4
 
 
 class PublishError(Exception):
@@ -127,20 +148,22 @@ class AzureStore:
     def list(self, prefix):
         return [b.name for b in self.container.list_blobs(name_starts_with=prefix)]
 
-    def write(self, name, data, content_type, cache_control, create_only=False, etag=None):
+    def write(self, name, data, content_type, cache_control, create_only=False, etag=None, progress=None):
+        """progress: optional callable(bytes_sent) while the upload runs."""
         from azure.core import MatchConditions
         from azure.core.exceptions import ResourceExistsError, ResourceModifiedError
         from azure.storage.blob import ContentSettings
         settings = ContentSettings(content_type=content_type, cache_control=cache_control,
                                    content_md5=bytearray(md5_bytes(data) if isinstance(data, bytes) else data[1]))
         body = data if isinstance(data, bytes) else open(data[0], "rb")
+        extra = {"progress_hook": lambda current, total: progress(current)} if progress else {}
         try:
             client = self.container.get_blob_client(name)
             if etag:
                 client.upload_blob(body, overwrite=True, content_settings=settings, etag=etag,
-                                   match_condition=MatchConditions.IfNotModified)
+                                   match_condition=MatchConditions.IfNotModified, **extra)
             else:
-                client.upload_blob(body, overwrite=not create_only, content_settings=settings)
+                client.upload_blob(body, overwrite=not create_only, content_settings=settings, **extra)
         except (ResourceExistsError, ResourceModifiedError) as e:
             raise Conflict(str(e).splitlines()[0])
         finally:
@@ -151,12 +174,26 @@ class AzureStore:
 # --------------------------------------------------------------------------------------- run log
 
 class Run:
-    def __init__(self, log_path, dry_run):
+    def __init__(self, log_path, dry_run, progress=False):
         self.dry_run = dry_run
         self.created, self.skipped, self.warnings = [], [], []
         log_path.parent.mkdir(parents=True, exist_ok=True)
         self.log_path = log_path
         self.log = open(log_path, "a", encoding="utf-8")
+        self.progress_enabled = progress
+        self._last_progress = 0.0
+
+    def progress(self, step, phase, done, total, unit, item="", files_done=0, files_total=0, force=False):
+        """Machine-readable progress for the Unity window; stdout only, at most ~5 per second unless forced."""
+        if not self.progress_enabled:
+            return
+        now = time.monotonic()
+        if not force and now - self._last_progress < 0.2:
+            return
+        self._last_progress = now
+        print("@@progress " + json.dumps({"step": step, "steps": PUBLISH_STEPS, "phase": phase, "done": done,
+                                          "total": total, "unit": unit, "item": item, "filesDone": files_done,
+                                          "filesTotal": files_total}), flush=True)
 
     def say(self, text=""):
         print(text, flush=True)
@@ -308,9 +345,24 @@ def load_products(staging, export, only):
     return products
 
 
-def upload_file(store, run, name, path, cache_control, create_only):
+def with_retries(run, what, action):
+    """Runs action(); retries transient failures (anything but Conflict/PublishError) after RETRY_DELAYS."""
+    for attempt in range(len(RETRY_DELAYS) + 1):
+        try:
+            return action()
+        except (Conflict, PublishError):
+            raise
+        except Exception as e:
+            if attempt == len(RETRY_DELAYS):
+                raise PublishError(f"{what} failed after {attempt + 1} attempts: {type(e).__name__}: {e}")
+            run.say(f"retrying {what} in {RETRY_DELAYS[attempt]}s ({type(e).__name__}: {str(e).splitlines()[0] if str(e) else ''})")
+            time.sleep(RETRY_DELAYS[attempt])
+
+
+def upload_file(store, run, name, path, cache_control, create_only, on_bytes=None):
+    """on_bytes: optional callable(bytes_sent_of_this_file) for progress."""
     local = md5_file(path)
-    remote = store.md5(name)
+    remote = with_retries(run, "checking " + name, lambda: store.md5(name))
     if remote is not None:
         if remote == local:
             run.skip(name + " (identical)")
@@ -322,18 +374,97 @@ def upload_file(store, run, name, path, cache_control, create_only):
         run.did(name)
         return
     try:
-        store.write(name, (path, local), CONTENT_TYPES.get(path.suffix, "application/octet-stream"), cache_control,
-                    create_only=create_only)
+        with_retries(run, "uploading " + name, lambda: store.write(
+            name, (path, local), CONTENT_TYPES.get(path.suffix, "application/octet-stream"), cache_control,
+            create_only=create_only, progress=on_bytes))
     except Conflict:
+        # A retry after a create-only upload that actually landed: same MD5 means it's ours.
+        if create_only and store.md5(name) == local:
+            run.skip(name + " (identical, landed on an earlier attempt)")
+            return
         raise PublishError(f"{name} was created by someone else during this run.")
     run.did(name)
+
+
+def upload_files(store, run, step, phase, files, cache_control, create_only, keep_going):
+    """Uploads (name, path) pairs with byte progress. keep_going: a failed file doesn't stop the others; the
+    failures are raised together at the end, before the caller moves on to the next step."""
+    sizes = [path.stat().st_size for _, path in files]
+    total, done, failures = sum(sizes), 0, []
+    run.progress(step, phase, 0, total, "bytes", "", 0, len(files), force=True)
+    for i, ((name, path), size) in enumerate(zip(files, sizes)):
+        base = done
+        try:
+            upload_file(store, run, name, path, cache_control, create_only,
+                        on_bytes=lambda sent, base=base, i=i, name=name: run.progress(
+                            step, phase, base + min(sent, size), total, "bytes", name, i, len(files)))
+        except PublishError as e:
+            if not keep_going:
+                raise
+            failures.append(str(e))
+            run.say("FAILED   " + str(e))
+        done += size
+        run.progress(step, phase, done, total, "bytes", name, i + 1, len(files), force=i + 1 == len(files))
+    if failures:
+        raise PublishError(f"{len(failures)} of {len(files)} file(s) in '{phase}' failed; nothing after them was "
+                           "written. Run the same publish again to upload only what's missing.\n  "
+                           + "\n  ".join(failures[:20]) + ("\n  ..." if len(failures) > 20 else ""))
+
+
+def strip_published(doc):
+    return {k: v for k, v in doc.items() if k not in ("version", "publishedUtc")}
+
+
+def interrupted_version(store, prefix, doc, entry, numbers):
+    """An interrupted publish can leave v<N>/product.json written but not yet listed in products.json. If the newest
+    such folder holds this same draft, return N so the rerun reuses it instead of taking the next number."""
+    if not numbers:
+        return None
+    top = max(numbers)
+    if f"v{top}" in (entry or {}).get("versions", []):
+        return None
+    found = store.read(f"{prefix}{doc['productId']}/v{top}/product.json")
+    if found is None:
+        return None
+    try:
+        remote = json.loads(found[0].decode("utf-8"))
+    except ValueError:
+        return None
+    return top if isinstance(remote, dict) and strip_published(remote) == strip_published(doc) else None
+
+
+def baseline_name(platform, app_version):
+    return f"{BASELINE_DIR}/{platform}/{app_version}/{BASELINE_FILE}"
+
+
+def plan_baseline(store, run, export, platform, app_version, allow_new_catalog):
+    """(blob name, local path, overwrite) to upload in step 2, or None. Checked before anything is written."""
+    name = baseline_name(platform, app_version)
+    local = export.get("contentStateFile")
+    if not local:
+        if store.md5(name) is None:
+            run.warn(f"No content-state baseline is stored for {platform} {app_version} and this export has none "
+                     "(see the exporter's warning). Content updates of this version need the .bin from its full build.")
+        return None
+    path = Path(local)
+    if not path.is_file():
+        raise PublishError(f"Content-state file {path} named in export.json is missing. Export again.")
+    remote = store.md5(name)
+    if remote is None or remote == md5_file(path):
+        return name, path, False
+    message = (f"{name} already holds a different content-state file. It must stay the one from the full build "
+               "players have: every content update of this version is built against it.")
+    if not allow_new_catalog:
+        raise PublishError(message + " This export comes from another full build; use a content update instead. "
+                           "If this app version hasn't shipped to players yet, pass --allow-new-catalog.")
+    run.warn(message + " Replacing it because --allow-new-catalog was given.")
+    return name, path, True
 
 
 def check_catalog_name(store, run, prefix, catalog_name, allow_new_catalog):
     """Installed players of an app version look for the catalog name baked into their build. A full rebuild of
     that version makes a catalog with a new name, which those players never load. Content updates keep the name."""
-    remote = sorted({rel for rel in (name[len(prefix):] for name in store.list(prefix + "catalog"))
-                     if "/" not in rel and re.match(r"^catalog.*\.(bin|json)$", rel)})
+    remote = remote_catalogs(store, prefix)
     if not remote or catalog_name in remote:
         return
     message = (f"{prefix} already has catalog {', '.join(remote)}, but this build produced {catalog_name}. "
@@ -353,6 +484,7 @@ def publish(store, run, staging, only, allow_new_catalog=False):
 
     build, catalog, hash_file, bundles = check_build(export)
     check_catalog_name(store, run, prefix, catalog.name, allow_new_catalog)
+    baseline = plan_baseline(store, run, export, platform, app_version, allow_new_catalog)
     products = load_products(staging, export, only)
     index, etag = load_index(store, prefix, platform, app_version)
 
@@ -361,7 +493,9 @@ def publish(store, run, staging, only, allow_new_catalog=False):
     for doc in products:
         pid = doc["productId"]
         entry = find_entry(index, pid)
-        number = max(version_numbers(store, prefix, pid, entry), default=0) + 1
+        numbers = version_numbers(store, prefix, pid, entry)
+        resumed = interrupted_version(store, prefix, doc, entry, numbers)
+        number = resumed or max(numbers, default=0) + 1
         if entry and entry.get("current"):
             live = store.read(f"{prefix}{pid}/{entry['current']}/product.json")
             if live is None:
@@ -372,33 +506,48 @@ def publish(store, run, staging, only, allow_new_catalog=False):
                 if removed:
                     run.warn(f"{pid}: {len(removed)} key(s) published in {entry['current']} are gone in v{number} "
                              f"(keys must only be added): " + ", ".join(removed[:10]) + (" ..." if len(removed) > 10 else ""))
-        plan.append((doc, entry, number))
+        plan.append((doc, entry, number, resumed is not None))
         run.say(f"  {pid}: v{number} ({len(doc['keys'])} keys{', local content only' if not doc['keys'] else ''})"
-                + (f", replaces {entry['current']}" if entry else ", new"))
+                + (f", replaces {entry['current']}" if entry and entry.get("current") else ", new")
+                + (", resuming an interrupted publish" if resumed is not None else ""))
 
     run.say("\n1. Bundles")
-    for rel, path in bundles:
-        upload_file(store, run, prefix + rel, path, IMMUTABLE, create_only=True)
+    upload_files(store, run, 1, "Bundles", [(prefix + rel, path) for rel, path in bundles], IMMUTABLE,
+                 create_only=True, keep_going=True)
 
     run.say("\n2. Catalog")
-    upload_file(store, run, prefix + catalog.name, catalog, SHORT, create_only=False)
-    upload_file(store, run, prefix + hash_file.name, hash_file, SHORT, create_only=False)
+    upload_files(store, run, 2, "Catalog", [(prefix + catalog.name, catalog), (prefix + hash_file.name, hash_file)],
+                 SHORT, create_only=False, keep_going=False)
+    if baseline:
+        name, path, overwrite = baseline
+        upload_files(store, run, 2, "Catalog", [(name, path)], "no-store", create_only=not overwrite, keep_going=False)
 
     run.say("\n3. Product manifests")
-    for doc, entry, number in plan:
-        final = dict(doc, version=number, publishedUtc=utc_now())
+    for i, (doc, entry, number, resumed) in enumerate(plan):
         name = f"{prefix}{doc['productId']}/v{number}/product.json"
+        run.progress(3, "Product manifests", i, len(plan), "files", name, i, len(plan))
+        if resumed:
+            run.skip(name + " (written by the interrupted publish, same content)")
+            continue
         if run.dry_run:
             run.did(name)
             continue
+        final = dict(doc, version=number, publishedUtc=utc_now())
         try:
-            store.write(name, dumps(final), "application/json", IMMUTABLE, create_only=True)
+            with_retries(run, "uploading " + name, lambda: store.write(
+                name, dumps(final), "application/json", IMMUTABLE, create_only=True))
         except Conflict:
-            raise PublishError(f"{name} already exists. Version folders are never overwritten; run again to take the next number.")
+            # A retry after an upload that actually landed shows up as a conflict: check whether it's ours.
+            found = store.read(name)
+            mine = found is not None and strip_published(json.loads(found[0].decode("utf-8"))) == strip_published(final)
+            if not mine:
+                raise PublishError(f"{name} already exists. Version folders are never overwritten; run again to take the next number.")
         run.did(name)
+    run.progress(3, "Product manifests", len(plan), len(plan), "files", "", len(plan), len(plan), force=True)
 
     run.say("\n4. products.json")
-    for doc, entry, number in plan:
+    run.progress(4, "products.json", 0, 1, "files", prefix + "products.json", 0, 1, force=True)
+    for doc, entry, number, _ in plan:
         version = f"v{number}"
         if entry is None:
             entry = {"productId": doc["productId"], "current": version, "versions": []}
@@ -407,6 +556,7 @@ def publish(store, run, staging, only, allow_new_catalog=False):
         entry["versions"] = [version] + [v for v in entry.get("versions", []) if v != version]
     index["catalogBuild"] = export["catalogBuild"]
     save_index(store, run, prefix, index, etag)
+    run.progress(4, "products.json", 1, 1, "files", prefix + "products.json", 1, 1, force=True)
 
 
 # --------------------------------------------------------------------------------------- rollback / status
@@ -446,9 +596,33 @@ def rollback(store, run, platform, app_version, product_id, to=None, drop=None):
     save_index(store, run, prefix, index, etag)
 
 
-def status(store, run, platform, app_version):
+def download_baseline(store, run, platform, app_version, out):
+    name = baseline_name(safe_segment(platform, "Platform"), safe_segment(app_version, "App version"))
+    found = store.read(name)
+    if found is None:
+        raise PublishError(f"No content-state baseline is stored at {name}. It's uploaded when a full build of "
+                           f"{platform} {app_version} is published; without it, pick the .bin from that build by hand.")
+    out = Path(out).resolve()
+    out.parent.mkdir(parents=True, exist_ok=True)
+    tmp = out.with_name(out.name + ".download")
+    tmp.write_bytes(found[0])
+    tmp.replace(out)
+    run.say(f"Downloaded {name} ({len(found[0])} bytes) to {out}")
+
+
+def remote_catalogs(store, prefix):
+    return sorted({rel for rel in (name[len(prefix):] for name in store.list(prefix + "catalog"))
+                   if "/" not in rel and re.match(r"^catalog.*\.(bin|json)$", rel)})
+
+
+def status(store, run, platform, app_version, state_json=False):
     prefix = f"{safe_segment(platform, 'Platform')}/{safe_segment(app_version, 'App version')}/"
     index, etag = load_index(store, prefix, platform, app_version)
+    if state_json:
+        # One machine-readable line for the Unity window's build suggestion.
+        print("@@state " + json.dumps({"catalogs": remote_catalogs(store, prefix),
+                                       "baseline": store.md5(baseline_name(platform, app_version)) is not None,
+                                       "products": len(index["products"])}), flush=True)
     if etag is None:
         run.say(f"No {prefix}products.json yet.")
         return
@@ -458,6 +632,12 @@ def status(store, run, platform, app_version):
 
 
 # --------------------------------------------------------------------------------------- main
+
+def resume_hint(run, args):
+    if args.command == "publish" and not args.dry_run and run.created:
+        run.say("\nTo continue: run the same publish again. Files already uploaded are skipped and manifests written "
+                "by this run are reused; products.json is only written at the very end.")
+
 
 def main(argv=None, store_factory=AzureStore):
     ap = argparse.ArgumentParser(description=__doc__, formatter_class=argparse.RawTextHelpFormatter)
@@ -469,6 +649,7 @@ def main(argv=None, store_factory=AzureStore):
         p.add_argument("--dry-run", action="store_true", help="read and report, write nothing")
         p.add_argument("--log-dir", type=Path, default=Path("Logs") / "dlc-publish")
         p.add_argument("--log-file", type=Path, help="exact log file instead of a timestamped one in --log-dir")
+        p.add_argument("--progress", action="store_true", help="print @@progress JSON lines (for the Unity window)")
 
     p = sub.add_parser("publish", help="upload an export")
     common(p)
@@ -490,14 +671,21 @@ def main(argv=None, store_factory=AzureStore):
     p = sub.add_parser("check", help="confirm the signed-in user can reach the container")
     common(p)
 
+    p = sub.add_parser("baseline", help="download the stored content-state file")
+    common(p)
+    p.add_argument("--platform", required=True)
+    p.add_argument("--app-version", required=True)
+    p.add_argument("--out", required=True, type=Path, help="where to save addressables_content_state.bin")
+
     p = sub.add_parser("status", help="print products.json")
     common(p)
     p.add_argument("--platform", required=True)
     p.add_argument("--app-version", required=True)
+    p.add_argument("--state-json", action="store_true", help="also print an @@state JSON line (for the Unity window)")
 
     args = ap.parse_args(argv)
     stamp = datetime.datetime.now().strftime("%Y%m%d_%H%M%S")
-    run = Run(args.log_file or args.log_dir / f"{args.command}_{stamp}.log", args.dry_run)
+    run = Run(args.log_file or args.log_dir / f"{args.command}_{stamp}.log", args.dry_run, args.progress)
     run.say(f"{args.command} {'(dry run) ' if args.dry_run else ''}{args.account_url}/{args.container}  {utc_now()}")
     try:
         if not re.match(r"^[a-z0-9](?!.*--)[a-z0-9-]{1,61}[a-z0-9]$", args.container):
@@ -507,14 +695,18 @@ def main(argv=None, store_factory=AzureStore):
             publish(store, run, args.staging, args.product, args.allow_new_catalog)
         elif args.command == "check":
             run.say(f"OK: signed in and can read {args.account_url}/{args.container}.")
+        elif args.command == "baseline":
+            download_baseline(store, run, args.platform, args.app_version, args.out)
         elif args.command == "rollback":
             rollback(store, run, args.platform, args.app_version, args.product, to=args.to, drop=args.drop)
         else:
-            status(store, run, args.platform, args.app_version)
+            status(store, run, args.platform, args.app_version, args.state_json)
     except PublishError as e:
+        resume_hint(run, args)
         run.summary(False, str(e))
         return 1
     except Exception as e:  # unexpected: still stop, still summarize
+        resume_hint(run, args)
         run.summary(False, f"{type(e).__name__}: {e}")
         return 1
     run.summary(True)

@@ -7,8 +7,9 @@ using UnityEditor;
 using UnityEngine;
 
 /// <summary>
-/// Build Utility > DLC Publish: pick publishing settings and a releases folder, check releases, export their
-/// per-product manifests, then publish the export with Tools~/DlcPublisher/publish_dlc.py.
+/// Build Utility > DLC Publish: pick publishing settings and a releases folder, check releases, build Addressables
+/// (full or content update, with a suggestion from what's already published), export their per-product manifests,
+/// then publish the export with Tools~/DlcPublisher/publish_dlc.py.
 /// </summary>
 public sealed class DlcPublishWindow : EditorWindow
 {
@@ -21,15 +22,54 @@ public sealed class DlcPublishWindow : EditorWindow
     [SerializeField] string rollbackProduct = "", rollbackVersion = "v1";
     [SerializeField] int rollbackMode;  // 0 = make current, 1 = drop
     [SerializeField] int exportIndex;
+    [SerializeField] string baselinePath = "";
+    [SerializeField] bool showBuildTools;
+
+    /// <summary>The last real publish, so a failed or cancelled one can be continued with the same arguments.</summary>
+    [Serializable]
+    sealed class PublishJob
+    {
+        public string folder;
+        public List<string> products; // null = every product in the export
+        public bool allowNewCatalog, hasProducts;
+        public bool failed;
+        public string what;
+    }
+
+    [SerializeField] PublishJob lastPublish;
 
     List<string> exports = new List<string>();
     Vector2 scroll, reportScroll;
     bool busy;
+
+    // Live output of the running command, filled from the script's background threads.
+    const int LiveLines = 200;
+    readonly object live = new object();
+    readonly Queue<string> liveTail = new Queue<string>();
+    DlcPublishProgress liveProgress, shownProgress;
+    bool liveDirty;
+    string runningLabel;
+    System.Threading.CancellationTokenSource cancelSource;
     bool azureBusy, azureOk;
     bool allowNewCatalog; // deliberately not serialized: off again after a reload
     string azureStatus = "Azure: not checked yet";
 
+    // What's published for the current platform and app version, for the build suggestion.
+    DlcContentPublisher.RemoteVersionState remote;
+    string remoteError, remoteKey;
+    bool remoteBusy, downloadingBaseline;
+
+    static string VersionKey => DlcContentPublisher.CurrentPlatform + "/" + DlcContentPublisher.CurrentAppVersion;
+    bool Busy => busy || DlcAddressablesBuild.Building;
+
     static string PrefKey(string name) => "Arbelos.DlcPublish." + PlayerSettings.productGUID + "." + name;
+
+    /// <summary>The publishing settings last chosen in this window, for other DLC windows.</summary>
+    public static DlcPublishingSettings SavedSettings()
+    {
+        string path = AssetDatabase.GUIDToAssetPath(EditorPrefs.GetString(PrefKey("settings"), ""));
+        return string.IsNullOrEmpty(path) ? null : AssetDatabase.LoadAssetAtPath<DlcPublishingSettings>(path);
+    }
 
     [MenuItem("Build Utility/DLC Publish")]
     public static void Open() => GetWindow<DlcPublishWindow>("DLC Publish");
@@ -49,6 +89,20 @@ public sealed class DlcPublishWindow : EditorWindow
     }
 
     void OnProjectChange() { list.Refresh(); RefreshExports(); Repaint(); }
+
+    void Update()
+    {
+        if (!busy) return;
+        lock (live)
+        {
+            if (!liveDirty) return;
+            liveDirty = false;
+            shownProgress = liveProgress;
+            report = $"Running {runningLabel}…\n" + string.Join("\n", liveTail);
+        }
+        reportScroll.y = float.MaxValue; // follow the output
+        Repaint();
+    }
     void OnFocus() => RefreshExports();
 
     void RefreshExports()
@@ -61,14 +115,25 @@ public sealed class DlcPublishWindow : EditorWindow
 
     void OnGUI()
     {
+        if (remoteKey != VersionKey)
+        {
+            // Switched platform or app version: the remote state and baseline belong to the old one.
+            if (remoteKey != null) baselinePath = "";
+            remoteKey = VersionKey;
+            remote = null;
+            remoteError = null;
+            if (azureOk) RefreshRemote();
+        }
         scroll = EditorGUILayout.BeginScrollView(scroll);
-        using (new EditorGUI.DisabledScope(busy || EditorApplication.isCompiling || EditorApplication.isPlayingOrWillChangePlaymode))
+        using (new EditorGUI.DisabledScope(Busy || EditorApplication.isCompiling || EditorApplication.isPlayingOrWillChangePlaymode))
         {
             DrawHeader();
             DrawSettings();
             EditorGUILayout.Space();
-            string listMessage = list.Draw(true);
+            string listMessage = list.Draw();
             if (listMessage != null) report = listMessage;
+            EditorGUILayout.Space();
+            DrawBuild();
             EditorGUILayout.Space();
             DrawExport();
             EditorGUILayout.Space();
@@ -77,6 +142,7 @@ public sealed class DlcPublishWindow : EditorWindow
             DrawRollback();
         }
         EditorGUILayout.Space();
+        DrawProgress();
         EditorGUILayout.LabelField(busy ? "Running…" : "Report", EditorStyles.boldLabel);
         reportScroll = EditorGUILayout.BeginScrollView(reportScroll, GUILayout.MinHeight(160));
         EditorGUILayout.SelectableLabel(report, EditorStyles.textArea, GUILayout.ExpandHeight(true),
@@ -89,7 +155,7 @@ public sealed class DlcPublishWindow : EditorWindow
     {
         EditorGUILayout.LabelField("DLC Publish", new GUIStyle(EditorStyles.boldLabel) { fontSize = 18 }, GUILayout.Height(24));
         EditorGUILayout.HelpBox(
-            "1. Build Addressables for the release's profile.  2. Check releases and Export.  3. Publish dry run, then Publish.\n" +
+            "1. Check releases, then Build (full or content update, as suggested).  2. Export.  3. Publish dry run, then Publish.\n" +
             "Uploads go to <container>/<Platform>/<appVersion>/ as the Azure user signed in below (Storage Blob Data Contributor). No keys are stored. See Documentation~/DLC-CONTENT.md.",
             MessageType.Info);
     }
@@ -185,6 +251,7 @@ public sealed class DlcPublishWindow : EditorWindow
                 azureStatus = azureOk
                     ? $"Azure: signed in as {user}   |   can read {settings.accountName}/{settings.container}"
                     : $"Azure: signed in as {user}   |   no access: {(error ?? output.Trim()).Replace("error: ", "")}";
+                if (azureOk) RefreshRemote();
             }
         }
         catch (Exception e) { azureOk = false; azureStatus = "Azure: check failed: " + e.Message; }
@@ -206,6 +273,188 @@ public sealed class DlcPublishWindow : EditorWindow
         settings = created;
         EditorPrefs.SetString(PrefKey("settings"), AssetDatabase.AssetPathToGUID(path));
         RefreshExports();
+    }
+
+    async void RefreshRemote()
+    {
+        if (!settings || remoteBusy) return;
+        remoteBusy = true;
+        string key = VersionKey;
+        try
+        {
+            var (state, error) = await DlcContentPublisher.RemoteState(settings);
+            if (key != VersionKey) return; // switched platform meanwhile; OnGUI asks again
+            remote = state;
+            remoteError = error;
+        }
+        catch (Exception e) { remote = null; remoteError = e.Message; }
+        finally
+        {
+            remoteBusy = false;
+            if (this) Repaint();
+        }
+    }
+
+    void DrawBuild()
+    {
+        EditorGUILayout.LabelField("Build", EditorStyles.boldLabel);
+        string pv = $"{DlcContentPublisher.CurrentPlatform} {DlcContentPublisher.CurrentAppVersion}";
+        int suggested = 0; // 1 = full build, 2 = content update
+        string suggestion;
+        var type = MessageType.Info;
+        if (!DlcReleaseService.IsStorePlatform(EditorUserBuildSettings.activeBuildTarget))
+        {
+            suggestion = $"The active build target is {EditorUserBuildSettings.activeBuildTarget}. Switch to Android or iOS; every release builds for both.";
+            type = MessageType.Warning;
+        }
+        else if (remoteBusy) suggestion = $"Checking what's published for {pv}…";
+        else if (remote == null)
+        {
+            suggestion = remoteError != null ? $"Couldn't read what's published for {pv}: {remoteError}" : "Sign in to Azure above to get a build suggestion.";
+            if (remoteError != null) type = MessageType.Warning;
+        }
+        else if (!remote.HasCatalog)
+        {
+            suggested = 1;
+            suggestion = $"Suggested: FULL BUILD. Nothing is published for {pv} yet.";
+        }
+        else
+        {
+            suggested = 2;
+            suggestion = $"Suggested: CONTENT UPDATE. {pv} already has {string.Join(", ", remote.catalogs)} ({remote.products} products), " +
+                         "and installed players only load that catalog. " +
+                         (remote.baseline ? "Its baseline is stored in Azure: click Download from Azure."
+                                          : "No baseline is stored for it: choose the .bin from the full build players have.");
+        }
+        using (new EditorGUILayout.HorizontalScope())
+        {
+            EditorGUILayout.HelpBox(suggestion, type);
+            using (new EditorGUI.DisabledScope(!settings || !azureOk || remoteBusy))
+                if (GUILayout.Button("Check again", GUILayout.Width(85), GUILayout.Height(38))) RefreshRemote();
+        }
+
+        using (new EditorGUILayout.HorizontalScope())
+        {
+            baselinePath = EditorGUILayout.TextField(new GUIContent("Content-state baseline",
+                "addressables_content_state.bin from the full build players have. Only used by Content update."), baselinePath);
+            if (GUILayout.Button("Browse", GUILayout.Width(60)))
+            {
+                string chosen = EditorUtility.OpenFilePanel("Content state of the full build players have", "", "bin");
+                if (!string.IsNullOrEmpty(chosen)) baselinePath = chosen;
+            }
+            using (new EditorGUI.DisabledScope(!settings || downloadingBaseline || (remote != null && !remote.baseline)))
+                if (GUILayout.Button(new GUIContent(downloadingBaseline ? "Downloading…" : "Download from Azure",
+                        $"Downloads the baseline stored when the full build of {pv} was published."), GUILayout.Width(140)))
+                    DownloadBaseline();
+        }
+
+        var picked = Checked();
+        string profileError = picked.Count > 0 ? DlcAddressablesBuild.CheckProfile(picked, out _) : null;
+        if (profileError != null) EditorGUILayout.HelpBox(profileError, MessageType.Warning);
+        using (new EditorGUI.DisabledScope(picked.Count == 0 || profileError != null))
+        using (new EditorGUILayout.HorizontalScope())
+        {
+            if (BuildButton("Full build", suggested == 1)) StartBuild(false);
+            if (BuildButton("Content update", suggested == 2)) StartBuild(true);
+        }
+        if (picked.Count == 0)
+            EditorGUILayout.LabelField("Check the releases this build is for. A build always covers every Addressables group.", EditorStyles.miniLabel);
+
+        showBuildTools = EditorGUILayout.Foldout(showBuildTools, "Build tools", true);
+        if (showBuildTools) using (new EditorGUI.IndentLevelScope()) DrawBuildTools(picked);
+    }
+
+    static bool BuildButton(string label, bool suggested)
+    {
+        var old = GUI.backgroundColor;
+        if (suggested) GUI.backgroundColor = new Color(0.45f, 0.85f, 0.5f);
+        bool clicked = GUILayout.Button(suggested ? label + "  (suggested)" : label, GUILayout.Height(24));
+        GUI.backgroundColor = old;
+        return clicked;
+    }
+
+    void StartBuild(bool update)
+    {
+        string pv = $"{DlcContentPublisher.CurrentPlatform} {DlcContentPublisher.CurrentAppVersion}";
+        if (!update && remote != null && remote.HasCatalog && !EditorUtility.DisplayDialog("Full build of a published version?",
+                $"{pv} already has a published catalog ({string.Join(", ", remote.catalogs)}).\n\nA full build makes a catalog with a new name. " +
+                "Players who already have this version never load it, and publishing it is refused unless you allow a new catalog name.\n\n" +
+                "Only do this if this version hasn't shipped to players. Otherwise use Content update.", "Full build anyway", "Cancel"))
+            return;
+        if (update && remote != null && !remote.HasCatalog && !EditorUtility.DisplayDialog("Content update of an unpublished version?",
+                $"Nothing is published for {pv} yet, so there's no shipped build to update. A full build is usually what you want.",
+                "Content update anyway", "Cancel"))
+            return;
+
+        string error = DlcAddressablesBuild.Queue(Checked(), update ? (baselinePath ?? "") : null, (ok, message) =>
+        {
+            report = message;
+            if (this) Repaint();
+        });
+        report = error ?? $"{(update ? "Content update" : "Full build")} for {pv} queued; Unity is busy until it finishes. Receipts: {DlcAddressablesBuild.ReceiptFolder}";
+        Repaint();
+    }
+
+    async void DownloadBaseline()
+    {
+        downloadingBaseline = true;
+        report = $"Downloading the content-state baseline for {DlcContentPublisher.CurrentPlatform} {DlcContentPublisher.CurrentAppVersion}…";
+        try
+        {
+            var (code, output) = await DlcContentPublisher.DownloadBaseline(settings);
+            if (code == 0) { baselinePath = DlcContentPublisher.BaselineDownloadPath; report = output; }
+            else report = "BASELINE DOWNLOAD FAILED\n" + output;
+        }
+        catch (Exception e) { report = "Baseline download failed: " + e.Message; }
+        finally
+        {
+            downloadingBaseline = false;
+            if (this) Repaint();
+        }
+    }
+
+    void DrawBuildTools(List<DlcRelease> picked)
+    {
+        using (new EditorGUI.DisabledScope(picked.Count == 0))
+            if (GUILayout.Button("Analyze Addressables build layout for the checked releases"))
+            {
+                string path = EditorUtility.OpenFilePanel("Build layout JSON from this build", "Library/com.unity.addressables", "json");
+                if (!string.IsNullOrEmpty(path))
+                    report = string.Join("\n\n", picked.Select(r => r.releaseId + ":\n" + DlcBuildLayoutReport.Analyze(path, DlcReleaseService.Snapshot(r))));
+            }
+        if (GUILayout.Button("Record built artifact sizes and checksums"))
+        {
+            string folder = EditorUtility.OpenFolderPanel("Select built output directory", "", "");
+            if (!string.IsNullOrEmpty(folder))
+            {
+                var inventory = DlcArtifactInventory.Capture(folder);
+                inventory["releaseIds"] = new JArray(picked.Select(r => r.releaseId));
+                string destination = EditorUtility.SaveFilePanel("Save inventory outside the output directory", "",
+                    $"{DlcContentPublisher.CurrentPlatform}-{DlcContentPublisher.CurrentAppVersion}.artifacts.json", "json");
+                if (!string.IsNullOrEmpty(destination))
+                {
+                    if (Path.GetFullPath(destination).StartsWith(Path.GetFullPath(folder).TrimEnd(Path.DirectorySeparatorChar) + Path.DirectorySeparatorChar, StringComparison.OrdinalIgnoreCase))
+                        report = "Save the inventory outside the directory it inventories.";
+                    else
+                    {
+                        DlcReleaseService.WriteNew(destination, inventory.ToString());
+                        report = "Recorded " + ((JArray)inventory["files"]).Count + " built files, " + EditorUtility.FormatBytes((long)inventory["totalBytes"]) + ".";
+                    }
+                }
+            }
+        }
+        if (GUILayout.Button("Verify built artifacts against inventory"))
+        {
+            string path = EditorUtility.OpenFilePanel("Artifact inventory", "", "json");
+            if (!string.IsNullOrEmpty(path))
+            {
+                string folder = EditorUtility.OpenFolderPanel("Directory to verify", "", "");
+                if (!string.IsNullOrEmpty(folder)) report = DlcArtifactInventory.Verify(JObject.Parse(File.ReadAllText(path)), folder);
+            }
+        }
+        if (GUILayout.Button("Open shared build / update / Azure upload tools"))
+            if (!EditorApplication.ExecuteMenuItem("Build Utility/Seamless Build"))
+                report = "Shared build utility menu is unavailable. Check com.arbelos.buildutility installation.";
     }
 
     void DrawExport()
@@ -262,8 +511,53 @@ public sealed class DlcPublishWindow : EditorWindow
                 if (GUILayout.Button("Publish dry run")) StartPublish(true);
                 if (GUILayout.Button("Publish…")) StartPublish(false);
             }
-            if (GUILayout.Button("Status", GUILayout.Width(70))) Execute("status", () => DlcContentPublisher.Status(settings));
+            if (GUILayout.Button("Status", GUILayout.Width(70))) Execute("status", (line, progress, cancel) => DlcContentPublisher.Status(settings));
         }
+        DrawResume();
+    }
+
+    void DrawResume()
+    {
+        if (lastPublish == null || !lastPublish.failed) return;
+        bool exportGone = !File.Exists(Path.Combine(lastPublish.folder ?? "", "export.json"));
+        EditorGUILayout.HelpBox(
+            $"The last publish ({lastPublish.what}) didn't finish. Everything it uploaded stays in place, and players " +
+            "don't see any of it until products.json is written at the very end. Resume runs the same publish again: " +
+            "files already uploaded are skipped and manifests it already wrote are reused." +
+            (exportGone ? "\n\nIts export folder no longer exists, so it can't be resumed." : ""),
+            MessageType.Warning);
+        using (new EditorGUILayout.HorizontalScope())
+        {
+            using (new EditorGUI.DisabledScope(exportGone))
+                if (GUILayout.Button("Resume publish")) ResumePublish();
+            if (GUILayout.Button("Dismiss", GUILayout.Width(70))) lastPublish = null;
+        }
+    }
+
+    void ResumePublish()
+    {
+        var job = lastPublish;
+        if (!EditorUtility.DisplayDialog("Resume DLC publish",
+                $"Publish {job.what} again from\n{job.folder}\n\nto\n{DlcContentPublisher.Destination(settings)}?\n\n" +
+                "Files already uploaded are skipped.", "Resume", "Cancel"))
+            return;
+        RunPublish(job.folder, job.hasProducts ? job.products : null, false, job.allowNewCatalog, job.what);
+    }
+
+    void DrawProgress()
+    {
+        if (!busy) return;
+        using (new EditorGUILayout.HorizontalScope())
+        {
+            Rect bar = EditorGUILayout.GetControlRect(GUILayout.Height(20));
+            var p = shownProgress;
+            EditorGUI.ProgressBar(bar, p?.Fraction ?? 0f, p != null ? p.Describe() : $"Running {runningLabel}…");
+            using (new EditorGUI.DisabledScope(cancelSource == null || cancelSource.IsCancellationRequested))
+                if (cancelSource != null && GUILayout.Button("Cancel", GUILayout.Width(70), GUILayout.Height(20)))
+                    cancelSource.Cancel();
+        }
+        if (shownProgress != null && !string.IsNullOrEmpty(shownProgress.Item))
+            EditorGUILayout.LabelField(shownProgress.Item, EditorStyles.miniLabel);
     }
 
     static string ExportLabel(string folder)
@@ -294,7 +588,22 @@ public sealed class DlcPublishWindow : EditorWindow
                 (allowNew ? "\n\nA new catalog name is ALLOWED for this app version. Only do this if it hasn't shipped." : ""), "Publish", "Cancel"))
             return;
         if (!dryRun) allowNewCatalog = false; // one publish at a time
-        Execute(dryRun ? "publish dry run" : "publish", () => DlcContentPublisher.Publish(settings, folder, products, dryRun, allowNew));
+        RunPublish(folder, products, dryRun, allowNew, what);
+    }
+
+    void RunPublish(string folder, List<string> products, bool dryRun, bool allowNew, string what)
+    {
+        if (!dryRun)
+            lastPublish = new PublishJob { folder = folder, products = products ?? new List<string>(), hasProducts = products != null,
+                allowNewCatalog = allowNew, what = what, failed = false };
+        var job = lastPublish;
+        Execute(dryRun ? "publish dry run" : "publish",
+            (line, progress, cancel) => DlcContentPublisher.Publish(settings, folder, products, dryRun, allowNew, line, progress, cancel),
+            code =>
+            {
+                if (!dryRun && job != null) job.failed = code != 0;
+                if (!dryRun) RefreshRemote();
+            });
     }
 
     void DrawRollback()
@@ -323,17 +632,42 @@ public sealed class DlcPublishWindow : EditorWindow
         if (!dryRun && !EditorUtility.DisplayDialog("Rollback DLC product",
                 $"{(drop ? "Drop" : "Make current")} {version} of {product} in\n{DlcContentPublisher.Destination(settings)}products.json?", "Rollback", "Cancel"))
             return;
-        Execute("rollback", () => DlcContentPublisher.Rollback(settings, product, version, drop, dryRun));
+        Execute("rollback", (line, progress, cancel) => DlcContentPublisher.Rollback(settings, product, version, drop, dryRun));
     }
 
-    async void Execute(string label, Func<System.Threading.Tasks.Task<(int code, string output)>> action)
+    /// <param name="action">Gets callbacks for output lines and progress (from background threads) and a cancel token.</param>
+    /// <param name="finished">Called with the exit code (1 on an exception).</param>
+    async void Execute(string label,
+        Func<Action<string>, Action<DlcPublishProgress>, System.Threading.CancellationToken, System.Threading.Tasks.Task<(int code, string output)>> action,
+        Action<int> finished = null)
     {
         busy = true;
+        runningLabel = label;
         report = $"Running {label}…";
+        lock (live) { liveTail.Clear(); liveProgress = null; liveDirty = false; }
+        shownProgress = null;
+        cancelSource = new System.Threading.CancellationTokenSource();
         Repaint();
+
+        void OnLine(string l)
+        {
+            lock (live)
+            {
+                liveTail.Enqueue(l);
+                while (liveTail.Count > LiveLines) liveTail.Dequeue();
+                liveDirty = true;
+            }
+        }
+        void OnProgress(DlcPublishProgress p)
+        {
+            lock (live) { liveProgress = p; liveDirty = true; }
+        }
+
+        int exit = 1;
         try
         {
-            var (code, output) = await action();
+            var (code, output) = await action(OnLine, OnProgress, cancelSource.Token);
+            exit = code;
             report = (code == 0 ? "" : $"{label.ToUpperInvariant()} FAILED (exit {code})\n") + output;
             if (code == 0) Debug.Log("[DLC Publish]\n" + output); else Debug.LogError("[DLC Publish]\n" + output);
         }
@@ -341,6 +675,10 @@ public sealed class DlcPublishWindow : EditorWindow
         finally
         {
             busy = false;
+            cancelSource.Dispose();
+            cancelSource = null;
+            shownProgress = null;
+            finished?.Invoke(exit);
             if (this) { reportScroll = Vector2.zero; Repaint(); }
         }
     }

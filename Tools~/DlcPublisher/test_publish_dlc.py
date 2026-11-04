@@ -25,10 +25,12 @@ class FakeStore:
     def list(self, prefix):
         return sorted(n for n in self.blobs if n.startswith(prefix))
 
-    def write(self, name, data, content_type, cache_control, create_only=False, etag=None):
+    def write(self, name, data, content_type, cache_control, create_only=False, etag=None, progress=None):
         if self.before_write:
             self.before_write(name)
         body = data if isinstance(data, bytes) else Path(data[0]).read_bytes()
+        if progress:
+            progress(len(body))
         if create_only and name in self.blobs:
             raise p.Conflict("exists")
         if etag and (name not in self.blobs or self.blobs[name][1] != etag):
@@ -39,6 +41,10 @@ class FakeStore:
 
 
 class PublishTests(unittest.TestCase):
+    @classmethod
+    def setUpClass(cls):
+        p.RETRY_DELAYS = (0, 0)
+
     def setUp(self):
         self.tmp = Path(tempfile.mkdtemp())
         self.build = self.tmp / "ServerData" / "Android" / "1.4.0"
@@ -51,13 +57,18 @@ class PublishTests(unittest.TestCase):
     def tearDown(self):
         shutil.rmtree(self.tmp, ignore_errors=True)
 
-    def export(self, products):
+    def export(self, products, content_state=None):
         stage = self.tmp / f"stage{len(list(self.tmp.glob('stage*')))}"
         stage.mkdir()
-        (stage / "export.json").write_text(json.dumps({
+        export = {
             "schemaVersion": 1, "kind": "dlc-content-export", "platform": "Android", "appVersion": "1.4.0",
             "catalogFile": "catalog_1.bin", "hashFile": "catalog_1.hash", "catalogBuild": "abc123",
-            "addressablesBuildPath": str(self.build), "products": list(products)}))
+            "addressablesBuildPath": str(self.build), "products": list(products)}
+        if content_state is not None:
+            state = self.tmp / f"state{len(list(self.tmp.glob('state*')))}.bin"
+            state.write_bytes(content_state)
+            export["contentStateFile"] = str(state)
+        (stage / "export.json").write_text(json.dumps(export))
         for pid, keys in products.items():
             (stage / pid).mkdir()
             (stage / pid / "product.json").write_text(json.dumps({
@@ -213,6 +224,137 @@ class PublishTests(unittest.TestCase):
     def test_unknown_product_filter_fails(self):
         self.assertEqual(1, self.run_cmd("publish", "--staging", str(self.export({"a": ["A/1"]})), "--product", "zzz"))
 
+    def test_failed_bundle_keeps_going_then_rerun_resumes(self):
+        (self.build / "other_assets_all_bb22.bundle").write_bytes(b"bundle-b")
+        stage = self.export({"a": ["A/1"]})
+        def broken(name):
+            if name.endswith("skins_assets_all_ff00.bundle"):
+                raise ConnectionError("network down")
+        self.store.before_write = broken
+        self.assertEqual(1, self.run_cmd("publish", "--staging", str(stage)))
+        self.assertIn("Android/1.4.0/other_assets_all_bb22.bundle", self.store.blobs)  # kept going
+        self.assertNotIn("Android/1.4.0/catalog_1.bin", self.store.blobs)  # stopped before the catalog
+        self.assertNotIn("Android/1.4.0/products.json", self.store.blobs)
+
+        self.store.before_write = None
+        self.store.writes.clear()
+        self.assertEqual(0, self.run_cmd("publish", "--staging", str(stage)))
+        self.assertNotIn("Android/1.4.0/other_assets_all_bb22.bundle", self.store.writes)  # skipped, identical
+        self.assertIn("Android/1.4.0/skins_assets_all_ff00.bundle", self.store.writes)
+        self.assertEqual("v1", self.index()["products"][0]["current"])
+
+    def test_transient_failure_is_retried(self):
+        failures = []
+        def flaky(name):
+            if name.endswith(".bundle") and not failures:
+                failures.append(name)
+                raise TimeoutError("timed out")
+        self.store.before_write = flaky
+        self.assertEqual(0, self.run_cmd("publish", "--staging", str(self.export({"a": ["A/1"]}))))
+        self.assertEqual(1, len(failures))
+        self.assertIn("Android/1.4.0/skins_assets_all_ff00.bundle", self.store.blobs)
+
+    def test_rerun_reuses_manifest_from_interrupted_publish(self):
+        stage = self.export({"a": ["A/1"]})
+        def interrupt(name):
+            if name.endswith("products.json"):
+                raise ConnectionError("connection reset")
+        self.store.before_write = interrupt
+        self.assertEqual(1, self.run_cmd("publish", "--staging", str(stage)))
+        self.assertIn("Android/1.4.0/a/v1/product.json", self.store.blobs)
+        self.assertNotIn("Android/1.4.0/products.json", self.store.blobs)
+
+        self.store.before_write = None
+        self.assertEqual(0, self.run_cmd("publish", "--staging", str(stage)))
+        self.assertNotIn("Android/1.4.0/a/v2/product.json", self.store.blobs)
+        entry = self.index()["products"][0]
+        self.assertEqual(("v1", ["v1"]), (entry["current"], entry["versions"]))
+
+    def test_changed_draft_after_interruption_takes_next_number(self):
+        def interrupt(name):
+            if name.endswith("products.json"):
+                raise ConnectionError("connection reset")
+        self.store.before_write = interrupt
+        self.run_cmd("publish", "--staging", str(self.export({"a": ["A/1"]})))
+        self.store.before_write = None
+        self.assertEqual(0, self.run_cmd("publish", "--staging", str(self.export({"a": ["A/1", "A/2"]}))))
+        self.assertEqual("v2", self.index()["products"][0]["current"])
+
+    def test_progress_lines(self):
+        import contextlib, io
+        out = io.StringIO()
+        with contextlib.redirect_stdout(out):
+            self.assertEqual(0, self.run_cmd("publish", "--staging", str(self.export({"a": ["A/1"]})), "--progress"))
+        events = [json.loads(l[len("@@progress "):]) for l in out.getvalue().splitlines() if l.startswith("@@progress ")]
+        self.assertEqual([1, 2, 3, 4], sorted({e["step"] for e in events}))
+        last = events[-1]
+        self.assertEqual((4, 1, 1), (last["step"], last["done"], last["total"]))
+        bundles = [e for e in events if e["step"] == 1]
+        self.assertEqual(bundles[-1]["total"], bundles[-1]["done"])
+        log = next((self.tmp / "logs").glob("publish_*.log")).read_text(encoding="utf-8")
+        self.assertNotIn("@@progress", log)
+    BASELINE = "_build-state/Android/1.4.0/addressables_content_state.bin"
+
+    def test_baseline_is_stored_once(self):
+        self.assertEqual(0, self.run_cmd("publish", "--staging", str(self.export({"a": ["A/1"]}, b"state-1"))))
+        self.assertEqual(b"state-1", self.store.blobs[self.BASELINE][0])
+        w = self.store.writes
+        self.assertLess(w.index("Android/1.4.0/catalog_1.hash"), w.index(self.BASELINE))
+        self.assertLess(w.index(self.BASELINE), w.index("Android/1.4.0/a/v1/product.json"))
+
+        # A content update exports the same file: skipped, not rewritten.
+        self.store.writes.clear()
+        self.assertEqual(0, self.run_cmd("publish", "--staging", str(self.export({"a": ["A/1", "A/2"]}, b"state-1"))))
+        self.assertNotIn(self.BASELINE, self.store.writes)
+
+    def test_different_baseline_fails_before_writing(self):
+        self.assertEqual(0, self.run_cmd("publish", "--staging", str(self.export({"a": ["A/1"]}, b"state-1"))))
+        writes = len(self.store.writes)
+        stage = self.export({"a": ["A/1"]}, b"state-2")
+        self.assertEqual(1, self.run_cmd("publish", "--staging", str(stage)))
+        self.assertEqual(writes, len(self.store.writes))
+        self.assertEqual(b"state-1", self.store.blobs[self.BASELINE][0])
+
+        self.assertEqual(0, self.run_cmd("publish", "--staging", str(stage), "--allow-new-catalog"))
+        self.assertEqual(b"state-2", self.store.blobs[self.BASELINE][0])
+
+    def test_export_without_baseline_warns_only_when_none_stored(self):
+        run = p.Run(self.tmp / "logs" / "a.log", dry_run=False)
+        p.publish(self.store, run, self.export({"a": ["A/1"]}), None)
+        run.summary(True)
+        self.assertTrue(any("No content-state baseline" in w for w in run.warnings))
+        self.assertNotIn(self.BASELINE, self.store.blobs)
+
+        self.store.blobs[self.BASELINE] = (b"state-1", "e1")
+        run = p.Run(self.tmp / "logs" / "b.log", dry_run=False)
+        p.publish(self.store, run, self.export({"a": ["A/1", "A/2"]}), None)
+        run.summary(True)
+        self.assertFalse(any("No content-state baseline" in w for w in run.warnings))
+
+    def test_baseline_dry_run_writes_nothing(self):
+        self.assertEqual(0, self.run_cmd("publish", "--staging", str(self.export({"a": ["A/1"]}, b"state-1")), "--dry-run"))
+        self.assertEqual([], self.store.writes)
+
+    def test_download_baseline(self):
+        out = self.tmp / "dl" / "addressables_content_state.bin"
+        base = ["baseline", "--platform", "Android", "--app-version", "1.4.0", "--out", str(out)]
+        self.assertEqual(1, self.run_cmd(*base))
+        self.assertFalse(out.exists())
+        self.store.blobs[self.BASELINE] = (b"state-1", "e1")
+        self.assertEqual(0, self.run_cmd(*base))
+        self.assertEqual(b"state-1", out.read_bytes())
+    def test_status_state_json(self):
+        import contextlib, io
+        base = ["status", "--platform", "Android", "--app-version", "1.4.0", "--state-json"]
+        def state():
+            out = io.StringIO()
+            with contextlib.redirect_stdout(out):
+                self.assertEqual(0, self.run_cmd(*base))
+            line = next(l for l in out.getvalue().splitlines() if l.startswith("@@state "))
+            return json.loads(line[len("@@state "):])
+        self.assertEqual({"catalogs": [], "baseline": False, "products": 0}, state())
+        self.run_cmd("publish", "--staging", str(self.export({"a": ["A/1"]}, b"state-1")))
+        self.assertEqual({"catalogs": ["catalog_1.bin"], "baseline": True, "products": 1}, state())
 
 if __name__ == "__main__":
     unittest.main()

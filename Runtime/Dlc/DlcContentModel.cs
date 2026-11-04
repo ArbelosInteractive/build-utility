@@ -39,7 +39,6 @@ namespace Arbelos.BuildUtility.Runtime
         public string platform;
         public string appVersion;
         public string releaseId;
-        public string target;
         public string minimumClientVersion;
         public List<string> keys = new List<string>();
         public string catalogBuild;

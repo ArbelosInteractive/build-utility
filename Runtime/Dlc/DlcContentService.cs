@@ -70,6 +70,12 @@ namespace Arbelos.BuildUtility.Runtime
         /// <summary>True when products.json for this platform and app version lists the product.</summary>
         public bool IsPublished(string productId) => productId != null && PublishedProductIds.Contains(productId);
 
+        /// <summary>
+        /// True when the last load could confirm products.json with the server (a fresh download or a 304).
+        /// False when it fell back to the cached copy, or had no copy at all; worth retrying later.
+        /// </summary>
+        public bool LastLoadWasOnline { get; private set; }
+
         public DlcContentService(DlcRemoteConfig config, string cacheRoot = null)
         {
             if (!config) throw new ArgumentNullException(nameof(config));
@@ -94,24 +100,46 @@ namespace Arbelos.BuildUtility.Runtime
             return false;
         }
 
-        /// <summary>Loads manifests for the owned products. A second call while one is running returns the same task.</summary>
-        public Task<IReadOnlyDictionary<string, DlcProductState>> LoadAsync(IEnumerable<string> ownedProductIds)
+        /// <summary>
+        /// Checks products.json with the server (If-None-Match; a 304 reuses the cache), then loads the manifest of
+        /// every product it lists, owned or not. Call it on every launch so DLC published since the last run shows up.
+        /// Ownership stays with the game's own entitlement code. A call while a load is running returns that load.
+        /// </summary>
+        public Task<IReadOnlyDictionary<string, DlcProductState>> LoadAllAsync()
         {
             if (running != null && !running.IsCompleted) return running;
-            running = LoadInternal((ownedProductIds ?? Enumerable.Empty<string>())
+            running = LoadInternal(null);
+            return running;
+        }
+
+        /// <summary>Like <see cref="LoadAllAsync"/>, but only for these product IDs. Their results are merged into
+        /// <see cref="Products"/>; other products' results are kept.</summary>
+        public Task<IReadOnlyDictionary<string, DlcProductState>> LoadAsync(IEnumerable<string> productIds)
+        {
+            if (running != null && !running.IsCompleted) return running;
+            running = LoadInternal((productIds ?? Enumerable.Empty<string>())
                 .Where(id => !string.IsNullOrWhiteSpace(id)).Select(id => id.Trim()).Distinct(StringComparer.Ordinal).ToList());
             return running;
         }
 
-        async Task<IReadOnlyDictionary<string, DlcProductState>> LoadInternal(List<string> owned)
+        /// <param name="ids">Products to load, or null for every product in products.json.</param>
+        async Task<IReadOnlyDictionary<string, DlcProductState>> LoadInternal(List<string> ids)
         {
+            bool all = ids == null;
             var result = new Dictionary<string, DlcProductState>(StringComparer.Ordinal);
             var (index, indexFromCache, indexError) = await LoadIndex();
+            LastLoadWasOnline = index != null && !indexFromCache;
             if (index != null)
                 PublishedProductIds = (index.products ?? new List<DlcProductsIndexEntry>())
                     .Where(p => p != null && !string.IsNullOrEmpty(p.productId)).Select(p => p.productId).Distinct(StringComparer.Ordinal).ToList();
+            if (ids == null)
+            {
+                // Nothing to load without a list; keep the previous results rather than wiping them.
+                if (index == null) { Debug.LogWarning("[DLC] " + indexError); return states; }
+                ids = PublishedProductIds.ToList();
+            }
 
-            foreach (string id in owned)
+            foreach (string id in ids)
             {
                 var state = new DlcProductState { ProductId = id };
                 result[id] = state;
@@ -126,11 +154,18 @@ namespace Arbelos.BuildUtility.Runtime
 
             await CheckKeys(result.Values.Where(s => s.Manifest != null && s.Status == DlcProductStatus.Ready).ToList());
 
+            // NotInAppVersion is normal for IDs that aren't DLC (currencies, consumables), so it isn't logged.
             foreach (var s in result.Values)
-                if (s.Status != DlcProductStatus.Ready)
+                if (s.Status != DlcProductStatus.Ready && s.Status != DlcProductStatus.NotInAppVersion)
                     Debug.LogWarning($"[DLC] {s.ProductId}: {s.Status}. {s.Message}");
 
-            states = result;
+            if (all) states = result;
+            else
+            {
+                var merged = new Dictionary<string, DlcProductState>(states, StringComparer.Ordinal);
+                foreach (var kv in result) merged[kv.Key] = kv.Value;
+                states = merged;
+            }
             return result;
         }
 

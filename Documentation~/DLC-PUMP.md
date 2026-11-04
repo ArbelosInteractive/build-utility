@@ -37,16 +37,16 @@ The catalog adapter currently expects the Unity IAP product-catalog JSON schema.
 ## Author a release
 
 1. Choose **New** and save outside Resources, preferably in Assets/Editor/DlcReleases.
-2. Set release ID, minimum client version, target, Addressables profile and notes.
+2. Set release ID, minimum client version, Addressables profile and notes. A release has no platform: every release ships to both Android and iOS, and build, export and publish use the editor's active build target (Android or iOS). Run them once per platform.
 3. Select products. Edit listing titles/descriptions if needed; saves retain unknown JSON fields and create backups. Concurrent edits are rejected.
 4. Discover content from project rules. Review required assets and Addressables keys. Discovery preserves manual assignments.
 5. Validate and resolve errors. Save modified content assets before exporting an immutable manifest. Compare against the previous manifest.
 
 ## Build and inspect
 
-Select the exact target and Addressables profile. A full build uses the shared checked build primitive. An update requires the original supported client's content-state file, archives that file and its hash, and never falls back to a full build. Both build configured Addressables groups, not only selected products. Build receipts record success or failure, manifest hash, provider and output path. Build success does not mean publication.
+Builds are in **Build Utility > DLC Publish**, not in the DLC Pump window: a build covers every Addressables group for the editor's platform and app version, not one release. Check the releases to ship, switch the editor to Android or iOS, and select their Addressables profile (the checked releases must share one). The Build section suggests **Full build** or **Content update** from what's already published for that platform and app version; both buttons stay available, and building against the suggestion asks first. A full build uses the shared checked build primitive. An update requires the original supported client's content-state file, archives that file and its hash, and never falls back to a full build. Both build configured Addressables groups, not only selected products. Build receipts go to `Logs/dlc-builds/<Platform>/<appVersion>/` and record the checked releases, success or failure, manifest hash, provider and output path; a content update also keeps a copy of its baseline there. Build success does not mean publication.
 
-Use **Analyze Addressables build layout** with the layout JSON produced by that build. It reports bundle sizes including dependencies per product and duplicate asset GUIDs. These are empty-cache bundle-size estimates, not guaranteed network bytes. Shared/local bundles and the player's cache affect network usage. Build layout APIs must be available in the installed Addressables version; this integration is validated against TSW's installed version.
+Under **Build tools** in DLC Publish, use **Analyze Addressables build layout** with the layout JSON produced by that build. It reports bundle sizes including dependencies per product and duplicate asset GUIDs. These are empty-cache bundle-size estimates, not guaranteed network bytes. Shared/local bundles and the player's cache affect network usage. Build layout APIs must be available in the installed Addressables version; this integration is validated against TSW's installed version.
 
 Record an artifact inventory outside the selected output directory. It contains each file's size and SHA-256. Verify a staging copy against it to detect missing, modified or unexpected files. Symlinks/junctions are rejected. Inventories are separate from build receipts and must be retained with the matching build.
 

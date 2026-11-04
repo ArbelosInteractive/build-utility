@@ -62,7 +62,7 @@ public sealed class DlcStoreExportWindow : EditorWindow
                     "Exporting needs no content build and sends no API requests. Upload the result with the IAP Uploader.", MessageType.Info);
                 DrawSettings();
                 EditorGUILayout.Space();
-                string listMessage = list.Draw(false);
+                string listMessage = list.Draw();
                 if (listMessage != null) report = listMessage;
                 EditorGUILayout.Space();
                 DrawActions();

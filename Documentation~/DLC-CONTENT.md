@@ -16,6 +16,9 @@ dlc-content/                                   container (DlcPublishingSettings.
         v2/product.json
     1.5.0/                                     starts empty; a product absent here doesn't exist for 1.5.0 clients
   iOS/ ...
+  _build-state/
+    Android/1.4.0/addressables_content_state.bin   the full build's content-state file, for content updates;
+                                                   stored once, never read by the game
 ```
 
 `products.json`:
@@ -29,7 +32,7 @@ dlc-content/                                   container (DlcPublishingSettings.
 
 ```json
 { "schemaVersion": 1, "productId": "wrestler_jazz", "version": 2, "platform": "Android", "appVersion": "1.4.0",
-  "releaseId": "...", "target": "Android", "minimumClientVersion": "", "keys": ["Jazz/Wrestling Gear/skin-material/...", "..."],
+  "releaseId": "...", "minimumClientVersion": "", "keys": ["Jazz/Wrestling Gear/skin-material/...", "..."],
   "catalogBuild": "<catalog hash>", "notes": "", "publishedUtc": "..." }
 ```
 
@@ -48,6 +51,21 @@ Keep **Build Remote Catalog** on and group **Bundle Naming** set to *Append Hash
 
 A content update for an app version that has already shipped uses Addressables' *Update a Previous Build* with that version's content-state file. The catalog name stays the same, and new or changed bundles get new hash names. A new app version uses a full build and starts with an empty folder and an empty `products.json`.
 
+### The content-state baseline
+
+Only full Addressables builds write `addressables_content_state.bin` (by default `Assets/AddressableAssetsData/<Platform>/`, which is git-ignored), and the next full build overwrites it. Every content update of an app version must be built against the file from the full build players have, so the publisher keeps a copy in the container:
+
+- **Stored once.** When you export, the exporter includes the local file only if it belongs to the catalog being exported (its `playerVersion` matches `catalog_<playerVersion>`). Publishing then uploads it to `_build-state/<Platform>/<appVersion>/` in step 2, after the catalog.
+- **Never overwritten by a content update.** Updates don't write the file, so an update's export either includes the same file, which is skipped, or none, in which case the exporter warns and the stored one stays.
+- **A different file fails the run** before anything is uploaded: it means a full rebuild of a version that already has a baseline. Ticking **allow a new catalog name** replaces it, for a version that hasn't shipped.
+- **Download it** with **Download from Azure** next to *Content-state baseline* in the Build section of DLC Publish. It saves to `Library/DlcBaselines/<Platform>/<appVersion>/` and fills in the field. On the command line: `publish_dlc.py baseline --account-url ... --platform Android --app-version 1.4.0 --out <file>`.
+
+The file lists asset paths, GUIDs and bundle hashes; there are no credentials in it. With public read access anyone who knows the URL can download it, which reveals little beyond the public catalog and bundles.
+
+If *Build Addressables on Player Build* is on, building the app runs another full Addressables build with a new catalog name. Publish that build's content, or turn the option off for release builds, so the stored baseline matches the app players install.
+
+Content update, step by step (once per platform): switch the editor to Android or iOS, check the releases, click **Download from Azure**, click **Content update**, then export and publish as usual.
+
 Clients that have already shipped keep the load path baked into their catalog, so changing the profile only affects new builds.
 
 ## One-time Azure setup
@@ -63,8 +81,9 @@ Clients that have already shipped keep the load path baked into their catalog, s
 
 ## Export, then publish
 
-1. Switch to the target platform, then build Addressables (full or content update) with the release's profile.
-2. Open **Build Utility > DLC Publish** (also reachable from the DLC Pump header). Pick the publishing settings and the folder that holds your `DlcRelease` assets; every release in it (and its subfolders) is listed. Check the releases to ship, then click **Validate (dry run)**, then **Export**. The export fails, and writes nothing, if:
+1. Open **Build Utility > DLC Publish** (also reachable from the DLC Pump header). Pick the publishing settings and the folder that holds your `DlcRelease` assets; every release in it (and its subfolders) is listed. Check the releases to ship.
+2. Switch the editor to Android or iOS and select the releases' Addressables profile. In **Build**, the window reads what's already published for this platform and app version and suggests one of the two buttons: **Full build** when nothing is published yet, **Content update** when a catalog is already there (players of that version only load that catalog). Both buttons stay available; building against the suggestion asks for confirmation first. A content update needs the baseline: **Download from Azure** fetches the stored one.
+3. Click **Validate (dry run)**, then **Export**. The export fails, and writes nothing, if:
    - a content entry's productId isn't in the release's productIds
    - a non-blank `addressablesKey` isn't an Addressables address
    - a key isn't in the built remote catalog
@@ -72,7 +91,7 @@ Clients that have already shipped keep the load path baked into their catalog, s
    - the profile paths break the app-version rule
 
    The export goes to `<stagingDirectory>/<Platform>/<appVersion>/<utc>/` and contains `export.json`, `validation.json` and one draft `product.json` per product. A product's version number is assigned when it's published.
-3. In the same window, choose the export, then click **Publish dry run** and then **Publish…**. *Only products of the checked releases* passes `--product` for just those products. **Status** prints the live `products.json`, and the **Rollback** section runs the rollback commands below. On the command line:
+4. In the same window, choose the export, then click **Publish dry run** and then **Publish…**. *Only products of the checked releases* passes `--product` for just those products. **Status** prints the live `products.json`, and the **Rollback** section runs the rollback commands below. On the command line:
 
 ```
 python Tools~/DlcPublisher/publish_dlc.py publish --staging <export dir> --account-url https://<account>.blob.core.windows.net --dry-run
@@ -81,14 +100,27 @@ python Tools~/DlcPublisher/publish_dlc.py publish --staging <export dir> --accou
 
 Before uploading anything, the publisher checks the catalog name. If the app-version folder already has a catalog with a different name, the run fails. That happens after a full rebuild of a version that already has a published catalog: installed players of that version keep loading the old catalog, so new content would never reach them. Use a content update instead, which keeps the name. For a version that hasn't shipped yet, tick **allow a new catalog name** in the DLC Publish window (or pass `--allow-new-catalog`); it resets after each publish, and the old catalog is left in place.
 
-The order is always the same, and the first error stops the run:
+The order is always the same:
 
-1. **Bundles.** An existing bundle with the same MD5 is skipped. The same name with different content fails the run.
+1. **Bundles.** An existing bundle with the same MD5 is skipped. The same name with different content is an error. A bundle that fails doesn't stop the other bundles, but the run stops after this step, before the catalog.
 2. **The catalog, then its `.hash`.**
 3. **Each product's next `v<N>/product.json`.** These are created only if the version doesn't already exist; an existing `v<N>` fails the run.
 4. **`products.json` last,** written with `If-Match` on the ETag read before the run. If someone else published in the meantime, the run fails without overwriting their changes. Run it again.
 
+A failed upload is retried twice (after 3 s and 10 s) before it counts as an error. Apart from failed bundles, the first error stops the run. Nothing is ever deleted.
+
 If a product's published keys are missing from the new version, the publisher prints a warning, because keys should only ever be added. Each run prints a summary of what was created and skipped and writes `Logs/dlc-publish/publish_<date>_<time>.log`.
+
+### Progress, cancelling and resuming
+
+While a publish runs, the DLC Publish window shows a progress bar: the step (1 to 4), megabytes uploaded and the file being uploaded during bundles and the catalog, and a count during manifests. The output streams into the report as it arrives. **Cancel** stops the script.
+
+Players see nothing from a publish until `products.json` is written at the very end, so stopping early is safe. After a publish fails or is cancelled, the window shows **Resume publish**, which runs the same publish again with the same export, products and catalog option. The same happens if you run the command again yourself:
+
+- Bundles and catalog files already uploaded are skipped (same MD5).
+- A `v<N>/product.json` written by the interrupted run but not yet listed in `products.json` is reused when it holds the same draft, so the product doesn't skip a version number. If you exported again with different keys, the next number is used instead.
+
+The window stops the script only if it prints nothing, not even progress, for 10 minutes. There's no overall time limit. `--progress` makes the script print the `@@progress {json}` lines the window reads; they aren't written to the log.
 
 ## Rollback
 
@@ -108,9 +140,11 @@ After a rollback, keys from the newer version that also need older bundles still
 
 ```csharp
 var service = new DlcContentService(remoteConfig);          // DlcRemoteConfig asset with cdnBaseUrl
-await service.LoadAsync(ownedProductIds);                    // from your entitlement code, after Addressables is initialized
-if (service.TryGetKeys("wrestler_jazz", out var keys)) { /* load or download by address */ }
+await service.LoadAllAsync();                                // every launch and on resume, after Addressables is initialized
+if (service.TryGetKeys("wrestler_jazz", out var keys)) { /* the game's own ownership check decides whether to use them */ }
 ```
+
+`LoadAllAsync()` loads the manifest of every product in `products.json`, owned or not; ownership stays in the game's entitlement code (PlayFab for TSW). Call it on every launch: `products.json` is always checked with the server, so DLC published for the same app version since the last run appears (an unchanged list costs a `304`). `LastLoadWasOnline` tells you whether that check reached the server, so you can retry later. `LoadAsync(ids)` does the same for a given list of IDs only.
 
 For `<Platform>/<Application.version>/`, the service:
 
