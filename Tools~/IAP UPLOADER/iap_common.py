@@ -3,10 +3,46 @@
 Keep this file in the same folder as the upload scripts.
 """
 import datetime
+import json
+import os
 import sys
 from pathlib import Path
 
 DEFAULT_LOG_DIR = Path(__file__).with_name("logs")
+
+# Set by `upload_all.py --progress` (the Unity window): print "@@item {json}" status lines as items finish.
+PROGRESS = os.environ.get("IAP_PROGRESS") == "1"
+PLATFORM_KEYS = {"Apple": "apple", "Google Play": "google", "PlayFab": "playfab"}
+
+
+def emit(kind, **data):
+    """One machine-readable line for the Unity window. Never written to the log (it goes to the real stdout)."""
+    if PROGRESS:
+        out = getattr(sys.stdout, "_console", sys.stdout)
+        out.write(f"@@{kind} " + json.dumps(data) + "\n")
+        out.flush()
+
+
+class _LiveList(list):
+    """A list that reports each added item, so the window can show statuses while the run is still going."""
+
+    def __init__(self, platform, status, values=()):
+        super().__init__(values)
+        self._platform, self._status = platform, status
+        for value in values:
+            emit("item", platform=self._platform, name=str(value), status=self._status)
+
+    def append(self, value):
+        super().append(value)
+        emit("item", platform=self._platform, name=str(value), status=self._status)
+
+    def extend(self, values):
+        for value in values:
+            self.append(value)
+
+    def __iadd__(self, values):
+        self.extend(values)
+        return self
 
 
 class _Tee:
@@ -56,7 +92,20 @@ class Report:
 
     def __init__(self, platform):
         self.platform = platform
-        self.created, self.updated, self.notes, self.failed, self.not_run = [], [], [], [], []
+        key = PLATFORM_KEYS.get(platform, platform.lower())
+        self._key = key
+        self.created, self.updated = _LiveList(key, "Created"), _LiveList(key, "Updated")
+        self.failed = _LiveList(key, "FAILED")
+        self.notes = []
+        self._not_run = []
+
+    @property
+    def not_run(self):
+        return self._not_run
+
+    @not_run.setter
+    def not_run(self, values):  # the scripts assign the whole list when a failure stops the run
+        self._not_run = _LiveList(self._key, "Not processed", values)
 
     @staticmethod
     def _section(title, items):

@@ -26,6 +26,29 @@ public class DlcStoreCatalogExportTests
         o.apple=false;
         Assert.IsFalse(BuildMapped(m,o).Keys.Any(k=>k.StartsWith("apple/")));
     }
+    [Test]
+    public void SelectedReleaseWaveSetsPlayFabDatesOnlyForItsProducts()
+    {
+        var m = Manifest(2); var o = Options(m);
+        var s = UnityEngine.ScriptableObject.CreateInstance<DlcWaveSchedule>();
+        try
+        {
+            s.waves.Add(new DlcWave { name = "Launch", starts = "2026-12-01 18:00", ends = "2026-12-08 18:00", productIds = new System.Collections.Generic.List<string> { "pack_0" } });
+            var waves = DlcWaveExport.Build(s, new[] { "pack_0", "pack_1" }, new[] { s.waves[0].id });
+            var files = DlcStoreCatalogExport.Build(m, o, b => b, waves);
+            var dated = (JObject)JObject.Parse(files["playfab/0001-create.json"])["Item"];
+            var plain = (JObject)JObject.Parse(files["playfab/0002-create.json"])["Item"];
+            StringAssert.StartsWith("2026-12-01T18:00:00", dated["StartDate"].ToString());
+            StringAssert.StartsWith("2026-12-08T18:00:00", dated["EndDate"].ToString());
+            Assert.IsFalse((bool)dated["IsHidden"]);
+            Assert.AreEqual(s.scheduleId, (string)dated["DisplayProperties"]["dlcPump"]["scheduleId"]);
+            Assert.IsNull(plain["StartDate"]); // products outside the selected waves keep whatever PlayFab has
+            Assert.IsNull(plain["DisplayProperties"]);
+            o.playFab = false;
+            Assert.Throws<InvalidOperationException>(() => DlcStoreCatalogExport.Build(m, o, b => b, waves));
+        }
+        finally { UnityEngine.Object.DestroyImmediate(s); }
+    }
     static string screenshotFixture;
     static string ReviewScreenshotFixture()
     {

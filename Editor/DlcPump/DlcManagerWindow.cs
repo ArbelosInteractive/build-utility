@@ -124,20 +124,31 @@ public sealed class DlcManagerWindow : EditorWindow
             string title = (string)product["defaultDescription"]?["title"] ?? id;
             if ((id + title).IndexOf(search, StringComparison.OrdinalIgnoreCase) < 0) continue;
             bool selected = release.productIds.Contains(id);
-            bool next = EditorGUILayout.ToggleLeft(title + "  [" + id + "]", selected);
+            bool next;
+            using (new EditorGUILayout.HorizontalScope())
+            {
+                next = EditorGUILayout.ToggleLeft(title + "  [" + id + "]", selected);
+                if (selected) ProductIcon(id);
+            }
             if (next != selected)
             {
                 Undo.RecordObject(release, "Change release product");
                 if (next) release.productIds.Add(id); else release.productIds.Remove(id);
                 EditorUtility.SetDirty(release);
             }
-            if (next && GUILayout.Button("Edit listing: " + title, EditorStyles.miniButton))
-            {
-                editingProduct = id;
-                productTitle = title;
-                productDescription = (string)product["defaultDescription"]?["description"] ?? "";
-                catalogHash = DlcReleaseService.Hash(File.ReadAllBytes(DlcReleaseService.CatalogPath));
-            }
+            if (next)
+                using (new EditorGUILayout.HorizontalScope())
+                {
+                    if (GUILayout.Button("Edit listing: " + title, EditorStyles.miniButton))
+                    {
+                        editingProduct = id;
+                        productTitle = title;
+                        productDescription = (string)product["defaultDescription"]?["description"] ?? "";
+                        catalogHash = DlcReleaseService.Hash(File.ReadAllBytes(DlcReleaseService.CatalogPath));
+                    }
+                    if (GUILayout.Button(new GUIContent("Edit icon", "Open this product's icon in Icon Studio (or start a new one)."), EditorStyles.miniButton, GUILayout.Width(80)))
+                        DlcIconStudioWindow.ForProduct(id);
+                }
         }
         if (!string.IsNullOrEmpty(editingProduct))
         {
@@ -170,6 +181,16 @@ public sealed class DlcManagerWindow : EditorWindow
                 report = DlcProject.Required.Populate(release);
             }
         }
+    }
+
+    /// <summary>The product's store icon (from the project adapter), 32×32, or a blank space when it has none yet.</summary>
+    static void ProductIcon(string productId)
+    {
+        string path = (DlcProject.Adapter as IDlcIconAuthoring)?.IconAssetPath(productId);
+        var texture = string.IsNullOrEmpty(path) ? null : AssetDatabase.LoadAssetAtPath<Texture2D>(path);
+        var rect = GUILayoutUtility.GetRect(32, 32, GUILayout.Width(32), GUILayout.Height(32));
+        if (texture) GUI.DrawTexture(rect, texture, ScaleMode.ScaleToFit);
+        else GUI.Label(rect, new GUIContent("—", "No icon yet. Use Edit icon."), EditorStyles.centeredGreyMiniLabel);
     }
 
     void DrawContent()

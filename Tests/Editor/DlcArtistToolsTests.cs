@@ -24,6 +24,62 @@ public class DlcArtistToolsTests
     {
         var s = Schedule(); try { var next = DlcWaveExport.Next(s.waves[0], 7); next.productIds.Add("arena"); s.waves.Add(next); Assert.IsNotEmpty(DlcWaveExport.Validate(s, new[] { "arena" })); next.promotion = true; Assert.IsEmpty(DlcWaveExport.Validate(s, new[] { "arena" })); } finally { UnityEngine.Object.DestroyImmediate(s); }
     }
+    static DlcWaveSchedule TwoWindows(string firstEnd, string secondStart)
+    {
+        var s = Schedule();
+        s.waves[0].ends = firstEnd;
+        s.waves.Add(new DlcWave { name = "Re-release", starts = secondStart, ends = "2027-01-10 18:00", productIds = new System.Collections.Generic.List<string> { "arena" } });
+        return s;
+    }
+    [Test] public void SeparateReleaseWindowsAllowedOverlappingRejected()
+    {
+        var s = TwoWindows("2026-11-13 18:00", "2026-12-01 18:00");
+        try
+        {
+            Assert.IsEmpty(DlcWaveExport.Validate(s, new[] { "arena" }));
+            s.waves[1].starts = "2026-11-13 18:00"; // touching ends are fine: windows are [start, end)
+            Assert.IsEmpty(DlcWaveExport.Validate(s, new[] { "arena" }));
+            s.waves[1].starts = "2026-11-10 18:00";
+            Assert.IsTrue(DlcWaveExport.Validate(s, new[] { "arena" }).Any(e => e.Contains("overlap")));
+            s.waves[1].starts = "2026-12-01 18:00"; s.waves[0].ends = ""; // an open-ended first window overlaps everything after it
+            Assert.IsTrue(DlcWaveExport.Validate(s, new[] { "arena" }).Any(e => e.Contains("overlap")));
+        }
+        finally { UnityEngine.Object.DestroyImmediate(s); }
+    }
+    [Test] public void SelectionAllowsOneReleaseWindowPerProductAndExportedProductsOnly()
+    {
+        var s = TwoWindows("2026-11-13 18:00", "2026-12-01 18:00");
+        try
+        {
+            var both = new[] { s.waves[0].id, s.waves[1].id };
+            Assert.IsTrue(DlcWaveExport.ValidateSelection(s, both).Any(e => e.Contains("several selected release waves")));
+            Assert.Throws<InvalidOperationException>(() => DlcWaveExport.Build(s, new[] { "arena" }, both));
+            Assert.IsEmpty(DlcWaveExport.ValidateSelection(s, new[] { s.waves[1].id }, new[] { "arena" }));
+            Assert.IsNotEmpty(DlcWaveExport.ValidateSelection(s, new[] { s.waves[1].id }, new string[0]));
+            Assert.IsNotEmpty(DlcWaveExport.ValidateSelection(s, new string[0]));
+            var json = DlcWaveExport.Build(s, new[] { "arena" }, new[] { s.waves[1].id });
+            Assert.AreEqual(1, ((JArray)json["waves"]).Count);
+            Assert.AreEqual("Re-release", (string)json["waves"][0]["name"]);
+        }
+        finally { UnityEngine.Object.DestroyImmediate(s); }
+    }
+    [Test] public void WithoutSelectionEachProductGetsItsCurrentOrNextWindow()
+    {
+        var s = TwoWindows("2026-11-13 18:00", "2026-12-01 18:00");
+        try
+        {
+            string Applied(DateTime now)
+            {
+                var json = DlcWaveExport.Build(s, new[] { "arena" }, null, now);
+                var item = DlcPlayFabPlan.Apply(new JObject { ["Id"] = "x" }, "arena", json);
+                return item["StartDate"].ToString();
+            }
+            Assert.IsTrue(Applied(new DateTime(2026, 11, 7, 0, 0, 0, DateTimeKind.Utc)).StartsWith("2026-11-06")); // first is active
+            Assert.IsTrue(Applied(new DateTime(2026, 11, 20, 0, 0, 0, DateTimeKind.Utc)).StartsWith("2026-12-01")); // between: the next one
+            Assert.IsTrue(Applied(new DateTime(2027, 2, 1, 0, 0, 0, DateTimeKind.Utc)).StartsWith("2026-12-01")); // after both: the last one
+        }
+        finally { UnityEngine.Object.DestroyImmediate(s); }
+    }
     [Test] public void DateBoundaryAndPauseStates()
     {
         var s = Schedule(); try { var w = s.waves[0]; w.ends = "2026-11-07 18:00"; var start = DlcWaveExport.ToUtc(w.starts, "UTC"); Assert.AreEqual("Scheduled", DlcWaveExport.State(w, "UTC", start.AddSeconds(-1))); Assert.AreEqual("Active", DlcWaveExport.State(w, "UTC", start)); Assert.AreEqual("Ended", DlcWaveExport.State(w, "UTC", start.AddDays(1))); w.paused = true; Assert.AreEqual("Paused", DlcWaveExport.State(w, "UTC", start)); } finally { UnityEngine.Object.DestroyImmediate(s); }

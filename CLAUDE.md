@@ -32,7 +32,7 @@ Each change bumps `version` in `package.json` and adds an entry at the top of `C
 
 Its README is detailed; read it before changing the scripts. Main points:
 
-- `upload_all.py` runs `upload_apple_iap.py` → `upload_google_iap.py` → `upload_playfab_items.py` as subprocesses and stops at the first platform that fails. `upload_gui.py` (launched by `Open IAP Uploader.bat`, which also installs dependencies) is a Tk front end over `upload_all.py`.
+- `upload_all.py` runs `upload_apple_iap.py` → `upload_google_iap.py` → `upload_playfab_items.py` as subprocesses and stops at the first platform that fails. The front end is the Upload section of the Unity **DLC Store Export** window (`DlcStoreExportWindow` + `DlcStoreUploader`), which runs `upload_all.py --export <folder> --progress` and reads its `@@items` / `@@platform` / `@@item` lines; the Tk window was removed. `iap_items.py` lists an export's items (`--list`).
 - `upload_config.json` holds the paths and the Key Vault name. Glob paths such as `dlc-store-export*/apple` resolve to the **most recently modified** match.
 - Credentials come only from Azure Key Vault (`iap_secrets.py`, the user runs `az login`). There are no credential files.
 - The scripts are written so re-running them is safe: existing products are updated instead of created again. `iap_common.py` writes a summary and a log for each run to `logs/`.

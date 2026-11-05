@@ -30,8 +30,7 @@ public sealed class DlcArtistWindow : EditorWindow
         var toolbar = new Toolbar(); root.Add(toolbar);
         toolbar.Add(new ToolbarButton(() => DlcManagerWindow.Open()) { text = "DLC Pump" });
         toolbar.Add(new Label("Release Waves"));
-        toolbar.Add(new ToolbarButton(DlcIconStudioWindow.Open) { text = "Icon Studio" });
-        toolbar.Add(new ToolbarButton(() => EditorUtility.DisplayDialog("Release Waves — how to use", "1. Create a schedule outside Resources.\n2. Add a wave and enter dates (YYYY-MM-DD HH:mm). Choose your system time zone.\n3. Drag products from the shelf, select and Add selected, or drop a DLC Release asset.\n4. Use the preview date to inspect active/scheduled/ended states.\n5. Validate, save drafts, and Export JSON.\n\nThe JSON is a DLC Pump schedule, not a PlayFab API request. Use Review PlayFab to inspect changes, then explicitly publish after the updated game client is deployed. Saving or exporting alone does not change live availability. Unassigned products remain unchanged.", "OK")) { text = "Help" });
+        toolbar.Add(new ToolbarButton(() => EditorUtility.DisplayDialog("Release Waves — how to use", "1. Create a schedule outside Resources.\n2. Add a wave and set its dates with Pick… (a calendar) or type YYYY-MM-DD HH:mm. Choose your system time zone.\n3. Drag products from the shelf, select and Add selected, or drop a DLC Release asset.\n4. Use the preview date to inspect active/scheduled/ended states.\n5. Validate, save drafts, and Export JSON.\n\nA product can be in several release waves only if their dates don't overlap. To set PlayFab dates, select waves in DLC Store Export and upload, or use Review PlayFab to inspect changes and publish after the updated game client is deployed.\n\nThe exported JSON is a DLC Pump schedule, not a PlayFab API request. Saving or exporting alone does not change live availability. Unassigned products remain unchanged.", "OK")) { text = "Help" });
         toolbar.Add(new ToolbarButton(() => { AssetDatabase.SaveAssets(); SetStatus("Drafts saved. No remote services changed."); }) { text = "Save drafts" });
         root.Add(new HelpBox("Plan releases locally and export JSON, or use Review PlayFab to publish reviewed dates. Saving drafts does not change live availability. Apple/Google readiness is separate.", HelpBoxMessageType.Info));
         var row = Row(); root.Add(row);
@@ -83,12 +82,9 @@ public sealed class DlcArtistWindow : EditorWindow
             string id = (string)p["id"], title = (string)p["defaultDescription"]?["title"] ?? id;
             var row = Row(); shelf.Add(row);
             var toggle = new Toggle { value = selected.Contains(id) }; toggle.RegisterValueChangedCallback(e => { if (e.newValue) selected.Add(id); else selected.Remove(id); }); row.Add(toggle);
-            var iconPath = (DlcProject.Adapter as IDlcIconAuthoring)?.IconAssetPath(id);
-            if (!string.IsNullOrEmpty(iconPath)) { var image = new Image { image = AssetDatabase.LoadAssetAtPath<Texture2D>(iconPath), scaleMode = ScaleMode.ScaleToFit }; image.style.width = 32; image.style.height = 32; row.Add(image); }
             var label = new Label(title); label.tooltip = id; label.style.flexGrow = 1; label.style.whiteSpace = WhiteSpace.Normal; row.Add(label);
             row.RegisterCallback<MouseMoveEvent>(e => { if ((e.pressedButtons & 1) == 0) return; DragAndDrop.PrepareStartDrag(); DragAndDrop.SetGenericData(DragKey, selected.Contains(id) ? selected.ToArray() : new[] { id }); DragAndDrop.StartDrag("DLC products"); e.StopPropagation(); });
             row.Add(Button("+", () => AddProducts(new[] { id })));
-            row.Add(Button("Icon", () => DlcIconStudioWindow.ForProduct(id)));
         }
         var main = new ScrollView(); columns.Add(main);
         if (schedule.waves.Count == 0) { main.Add(new HelpBox("Add your first wave. Unassigned products keep their existing behavior.", HelpBoxMessageType.Info)); return; }
@@ -100,10 +96,13 @@ public sealed class DlcArtistWindow : EditorWindow
             string state; try { state = DlcWaveExport.State(w, schedule.timeZone, PreviewUtc()); } catch { state = "Needs dates"; }
             main.Add(Button((i == selectedWave ? "▶ " : "") + w.name + " · " + state + " · " + w.productIds.Count + " products", () => { selectedWave = index; Rebuild(); }));
         }
+        var problems = DlcWaveExport.Validate(schedule, Products.Select(p => (string)p["id"]));
+        if (problems.Count > 0)
+            main.Insert(0, new HelpBox($"{problems.Count} problem(s):\n" + string.Join("\n", problems.Take(8)) + (problems.Count > 8 ? "\n…(Validate shows all)" : ""), HelpBoxMessageType.Warning));
         var wave = schedule.waves[selectedWave];
         Text(main, "Wave name", wave.name, v => wave.name = v);
-        Text(main, "Starts (YYYY-MM-DD HH:mm)", wave.starts, v => wave.starts = v);
-        Text(main, "Ends (blank = stays available)", wave.ends, v => wave.ends = v);
+        DateText(main, "Starts (YYYY-MM-DD HH:mm)", wave.starts, false, v => Change("Change wave start", () => wave.starts = v));
+        DateText(main, "Ends (blank = stays available)", wave.ends, true, v => Change("Change wave end", () => wave.ends = v));
         var promotion = new Toggle("Feature existing products only") { value = wave.promotion }; promotion.RegisterValueChangedCallback(e => Change("Change wave purpose", () => wave.promotion = e.newValue)); main.Add(promotion);
         var paused = new Toggle("Paused in exported plan") { value = wave.paused }; paused.RegisterValueChangedCallback(e => Change("Pause wave", () => wave.paused = e.newValue)); main.Add(paused);
         var drop = new VisualElement(); drop.style.minHeight = 70; drop.style.paddingTop = 10; drop.style.paddingBottom = 10; drop.Add(new Label("DROP PRODUCTS HERE")); main.Add(drop);
@@ -113,8 +112,21 @@ public sealed class DlcArtistWindow : EditorWindow
         var actions = Row(); main.Add(actions);
         actions.Add(Button("Next week (empty wave)", () => Next(7))); actions.Add(Button("Next fortnight", () => Next(14)));
         actions.Add(Button("Delete wave", () => Change("Delete wave", () => schedule.waves.RemoveAt(selectedWave))));
-        var preview = new TextField("Preview local date (blank = now)") { value = previewDate, isDelayed = true }; preview.RegisterValueChangedCallback(e => { previewDate = e.newValue; Rebuild(); }); main.Add(preview);
-        main.Add(new HelpBox("Preview is local only. One release window per product; repeat promotion waves are allowed. Existing owners retain access. Project drops accept DLC Release assets, not arbitrary artwork.", HelpBoxMessageType.Info));
+        DateText(main, "Preview local date (blank = now)", previewDate, true, v => { previewDate = v; Rebuild(); });
+        main.Add(new HelpBox("Preview is local only. A product can be in several release waves if their dates don't overlap; promotion waves can repeat freely. Existing owners retain access. Project drops accept DLC Release assets, not arbitrary artwork.", HelpBoxMessageType.Info));
+    }
+
+    /// <summary>A date text field (still typeable) with a Pick… button that opens a calendar.</summary>
+    void DateText(VisualElement parent, string label, string value, bool allowClear, Action<string> set)
+    {
+        var row = Row(); row.style.flexWrap = Wrap.NoWrap; parent.Add(row);
+        var field = new TextField(label) { value = value, isDelayed = true }; field.style.flexGrow = 1;
+        field.RegisterValueChangedCallback(e => set(e.newValue)); row.Add(field);
+        Button pick = null;
+        pick = Button("Pick…", () => UnityEditor.PopupWindow.Show(pick.worldBound,
+            new DlcDateTimePicker(field.value, "Time zone: " + (schedule ? schedule.timeZone : "UTC"), allowClear, set)));
+        pick.tooltip = "Choose the date and time from a calendar.";
+        row.Add(pick);
     }
     DateTime PreviewUtc() => string.IsNullOrWhiteSpace(previewDate) ? DateTime.UtcNow : DlcWaveExport.ToUtc(previewDate, schedule.timeZone);
     void Text(VisualElement parent, string label, string value, Action<string> setter)

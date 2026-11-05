@@ -10,6 +10,14 @@ Each file is the body of a Catalog/CreateDraftItem call:
 Re-run safe: for each file the script first looks the item up by its FriendlyId. If it
 already exists (as a draft) it is updated with UpdateDraftItem, otherwise it is created
 with CreateDraftItem. Nothing is saved locally; PlayFab is the source of truth.
+
+Updating merges: the file's fields replace the draft's, and everything the file leaves out
+keeps its current PlayFab value (images, StartDate/EndDate, IsHidden, tags, other
+DisplayProperties such as the thumbnail metadata). The draft's ETag is sent along, so a draft
+changed by someone else in the meantime makes the update fail instead of being overwritten.
+Release-wave dates come from the export: a file with StartDate/EndDate sets them, a file
+without keeps the dates the item already has. A file whose DisplayProperties.dlcPump names a
+different wave schedule than the draft's fails, like the DLC PlayFab Review window does.
 The first error stops the run. A summary of created / updated items is printed and written
 to a log file (logs\playfab_<date>_<time>.log, or --log-file).
 
@@ -123,6 +131,46 @@ def validate(body):
     return errs
 
 
+READ_ONLY = ("CreationDate", "LastModifiedDate", "Moderation", "Rating", "CreatorEntity", "FriendlyId")
+
+
+def merge_existing(existing, item):
+    """The draft to send with UpdateDraftItem: the existing draft, with the export file's fields on top.
+
+    Fields the file doesn't set keep their PlayFab values. DisplayProperties are merged key by key, and so is
+    DisplayProperties.dlcPump (so the thumbnail hash and pixel-art flag set by the Review window survive).
+    Raises ValueError when the file and the draft are managed by different wave schedules.
+    """
+    merged = {k: v for k, v in existing.items() if k not in READ_ONLY}
+    for key, value in item.items():
+        old = merged.get(key)
+        if key == "DisplayProperties" and isinstance(value, dict) and isinstance(old, dict):
+            props = dict(old)
+            for pkey, pvalue in value.items():
+                if pkey == "dlcPump" and isinstance(pvalue, dict) and isinstance(props.get(pkey), dict):
+                    mine, theirs = pvalue.get("scheduleId"), props[pkey].get("scheduleId")
+                    if mine and theirs and mine != theirs:
+                        raise ValueError(f"the item is managed by wave schedule {theirs}, but the export uses {mine}. "
+                                         "Resolve which schedule owns it before uploading.")
+                    pump = dict(props[pkey])
+                    pump.update(pvalue)
+                    props[pkey] = pump
+                else:
+                    props[pkey] = pvalue
+            merged[key] = props
+        else:
+            merged[key] = value
+    merged["Id"] = existing["Id"]
+    return merged
+
+
+def describe_dates(item):
+    start, end = item.get("StartDate"), item.get("EndDate")
+    if start is None and end is None and "IsHidden" not in item:
+        return ""
+    return f"  dates {start or '-'} -> {end or 'no end'}" + ("  [hidden]" if item.get("IsHidden") else "")
+
+
 def collect(target):
     files = [target] if target.is_file() else sorted(target.rglob("*.json"))
     if not files:
@@ -177,7 +225,7 @@ def main():
         for f, fid, body in items:
             item = body["Item"]
             print(f"  {fid:<28} {item['ContentType']:<10} \"{item['Title']['NEUTRAL']}\"   ({f.name})"
-                  + ("  [publish]" if args.publish else ""))
+                  + ("  [publish]" if args.publish else "") + describe_dates(item))
         print(f"\nDry run: {len(items)} item(s) valid, nothing was sent.")
         return
 
@@ -201,15 +249,15 @@ def main():
         try:
             existing = client.find_draft(fid)
             if existing:
-                body["Item"]["Id"] = existing["Id"]
+                body["Item"] = merge_existing(existing, body["Item"])
                 client.call("/Catalog/UpdateDraftItem", body)
                 report.updated.append(fid)
-                print(f"  {fid}: already existed, values updated (id {existing['Id']})")
+                print(f"  {fid}: already existed, values updated (id {existing['Id']}){describe_dates(body['Item'])}")
             else:
                 resp = client.call("/Catalog/CreateDraftItem", body)
                 report.created.append(fid)
-                print(f"  {fid}: created new (id {(resp.get('Item') or {}).get('Id', '?')})")
-        except ApiError as e:  # the first failure stops the run
+                print(f"  {fid}: created new (id {(resp.get('Item') or {}).get('Id', '?')}){describe_dates(body['Item'])}")
+        except (ApiError, ValueError) as e:  # the first failure stops the run
             print(f"  FAILED: {fid} ({f.name}): {e}")
             report.failed.append(f"{fid} ({f.name}): {e}")
             report.not_run = [i[1] for i in items[n + 1:]]

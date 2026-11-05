@@ -6,6 +6,16 @@ using UnityEngine;
 public sealed class DlcStoreExportSettings : ScriptableObject
 {
     public DlcStoreExportOptions options = new DlcStoreExportOptions();
+
+    [Tooltip("Azure Key Vault holding the Apple, Google and PlayFab upload credentials (just the name, not the URL). " +
+             "Nothing secret is stored in this asset; each person signs in with their own Azure account.")]
+    public string keyVaultName = "";
+
+    [Tooltip("Optional. Azure tenant ID or domain for Sign in to Azure, needed when your account is a guest in the vault's tenant.")]
+    public string azureTenant = "";
+
+    [Tooltip("Python 3.8+ with: requests pyjwt[crypto] google-auth azure-identity azure-keyvault-secrets (Install packages in the Upload section).")]
+    public string pythonExecutable = "python";
 }
 
 [Serializable]

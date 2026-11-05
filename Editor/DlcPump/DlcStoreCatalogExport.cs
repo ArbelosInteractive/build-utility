@@ -155,8 +155,16 @@ public static class DlcStoreCatalogExport
     public static Dictionary<string, string> Build(JObject manifest, DlcStoreExportOptions o, Func<byte[], byte[]> prepareAppleScreenshot)
         => BuildPackage(manifest, o, prepareAppleScreenshot, out _);
 
-    static Dictionary<string, string> BuildPackage(JObject manifest, DlcStoreExportOptions o, Func<byte[], byte[]> prepareAppleScreenshot, out Dictionary<string, byte[]> screenshots)
+    /// <param name="waves">Optional schedule from <see cref="DlcWaveExport.Build"/> (selected waves only). Each PlayFab
+    /// item in it gets its StartDate, EndDate, IsHidden and dlcPump metadata, exactly as the PlayFab Review window
+    /// would set them, so new items are created with their dates and are never live without them.</param>
+    public static Dictionary<string, string> Build(JObject manifest, DlcStoreExportOptions o, Func<byte[], byte[]> prepareAppleScreenshot, JObject waves)
+        => BuildPackage(manifest, o, prepareAppleScreenshot, out _, waves);
+
+    static Dictionary<string, string> BuildPackage(JObject manifest, DlcStoreExportOptions o, Func<byte[], byte[]> prepareAppleScreenshot, out Dictionary<string, byte[]> screenshots,
+        JObject waves = null)
     {
+        if (waves != null && !o.playFab) throw new InvalidOperationException("Release waves set PlayFab dates; turn on PlayFab in the store export settings or deselect the waves.");
         var errors = Validate(manifest, o);
         if (errors.Count > 0) throw new InvalidOperationException(string.Join("\n", errors));
         screenshots = new Dictionary<string, byte[]>(StringComparer.Ordinal);
@@ -176,10 +184,12 @@ public static class DlcStoreCatalogExport
                 var description = new JObject { ["NEUTRAL"] = p["defaultDescription"]["description"].DeepClone() };
                 foreach (var l in (c.localizations ?? new List<DlcStoreExportLocalization>()).Where(l => l != null && !string.IsNullOrEmpty(l.playFabLocale)))
                 { title[l.playFabLocale] = l.title; description[l.playFabLocale] = l.description; }
+                var item = new JObject {
+                    ["Type"] = "catalogItem", ["ContentType"] = c.playFabContentType, ["Title"] = title, ["Description"] = description,
+                    ["AlternateIds"] = new JArray(new JObject { ["Type"] = "FriendlyId", ["Value"] = id }) };
+                if (waves != null) item = DlcPlayFabPlan.Apply(item, id, waves);
                 Add(files, requests, "playfab-" + key, "PlayFab", "POST", "https://" + o.playFabTitleId + ".playfabapi.com/Catalog/CreateDraftItem",
-                    "playfab/" + key + "-create.json", new JObject { ["Publish"] = false, ["Item"] = new JObject {
-                        ["Type"] = "catalogItem", ["ContentType"] = c.playFabContentType, ["Title"] = title, ["Description"] = description,
-                        ["AlternateIds"] = new JArray(new JObject { ["Type"] = "FriendlyId", ["Value"] = id }) } }, id);
+                    "playfab/" + key + "-create.json", new JObject { ["Publish"] = false, ["Item"] = item }, id);
             }
             if (o.apple)
             {
@@ -285,9 +295,16 @@ public static class DlcStoreCatalogExport
         => Export(manifest, options, parentDirectory, DlcAppleScreenshot.Prepare);
 
     public static string Export(JObject manifest, DlcStoreExportOptions options, string parentDirectory, Func<byte[], byte[]> prepareAppleScreenshot)
+        => Export(manifest, options, parentDirectory, prepareAppleScreenshot, null);
+
+    /// <param name="waves">Optional selected release waves (see <see cref="Build(JObject, DlcStoreExportOptions, Func{byte[], byte[]}, JObject)"/>);
+    /// also written to release-waves.json in the export folder as a record.</param>
+    public static string Export(JObject manifest, DlcStoreExportOptions options, string parentDirectory, Func<byte[], byte[]> prepareAppleScreenshot, JObject waves)
     {
         // Complete validation and serialization before touching the destination.
-        var files = BuildPackage(manifest, options, prepareAppleScreenshot, out var screenshots);
+        var files = BuildPackage(manifest, options, prepareAppleScreenshot, out var screenshots, waves);
+        // At the export root, not in playfab/: the uploader reads every JSON file in that folder as an item.
+        if (waves != null) files["release-waves.json"] = waves.ToString();
         string directory = Path.Combine(Path.GetFullPath(parentDirectory), "dlc-store-export-" + DateTime.UtcNow.ToString("yyyyMMddTHHmmssfffZ") + "-" + Guid.NewGuid().ToString("N"));
         Directory.CreateDirectory(directory);
         foreach (var file in files)

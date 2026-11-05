@@ -8,9 +8,9 @@ Scripts that upload in-app purchase definitions from JSON files to three service
 | `upload_google_iap.py` | Google Play (one-time products) | a `batchUpdate` JSON file |
 | `upload_playfab_items.py` | PlayFab Economy v2 (catalog items) | one `CreateDraftItem` JSON per item |
 | `upload_all.py` | runs the three above, in that order | `upload_config.json` |
-| `upload_gui.py` | a window that lists the products and has upload buttons (runs `upload_all.py`) | `upload_config.json` |
+| Unity: **DLC Store Export > Upload** | a window that lists the products and has per-store and all-store upload buttons (runs `upload_all.py`) | the chosen export folder |
 
-`iap_common.py` (logging and the summary) and `iap_secrets.py` (reads the credentials from Azure Key Vault) are helpers the scripts import. Keep them in the same folder as the scripts.
+`iap_common.py` (logging and the summary), `iap_secrets.py` (reads the credentials from Azure Key Vault) and `iap_items.py` (lists the products in an export) are helpers the scripts import. Keep them in the same folder as the scripts.
 
 The store credentials (Apple key, Google service account, PlayFab secret) are **not stored in files**. They live in an Azure Key Vault, and each person signs in with their own Azure account (section 3).
 
@@ -29,7 +29,7 @@ winget install Microsoft.AzureCLI
 
 Close and reopen the terminal after installing the Azure CLI so `az` is found.
 
-Installing everything is simplest. If `pip` isn't recognised, try `py -m pip install ...` or `python -m pip install ...`. `Open IAP Uploader.bat` installs the pip packages for you on its first run, and, if `az` is missing, the Azure CLI too (through winget, with a Windows permission prompt).
+Installing everything is simplest. If `pip` isn't recognised, try `py -m pip install ...` or `python -m pip install ...`. In Unity, **Install Python packages** in the Upload section of DLC Store Export runs the same command.
 
 ---
 
@@ -44,7 +44,7 @@ upload_google_iap.py
 upload_playfab_items.py
 iap_common.py
 iap_secrets.py
-upload_gui.py
+iap_items.py
 upload_config.json
 apple\
     0001\  00-pricepoint.json, 01-create.json, 02-localization-01.json, 03-pricing.json,
@@ -107,8 +107,8 @@ Where the values come from:
 ### 3c. Everyone who runs the uploads
 
 1. Install the packages and the Azure CLI (section 1).
-2. Set `keyvault_name` in `upload_config.json` (section 4), or in the window under **Settings...**.
-3. Sign in: run `az login` in a terminal, or click **Sign in to Azure** in the window. A browser opens. If you are a guest in someone else's Azure tenant, sign in with `az login --tenant <tenant-id-or-domain>`, or put the tenant in `azure_tenant` in the config so the window's button does it for you.
+2. Set `keyvault_name` in `upload_config.json` (section 4), or, in Unity, the Key Vault name in the Upload settings of DLC Store Export.
+3. Sign in: run `az login` in a terminal, or click **Sign in to Azure** in the Unity window. A browser opens. If you are a guest in someone else's Azure tenant, sign in with `az login --tenant <tenant-id-or-domain>`, or set the Azure tenant in the Unity window's Upload settings so its button does it for you.
 
 The tools use your `az login` session. There is no key to copy and nothing to paste into a file. Check access any time with:
 ```
@@ -166,6 +166,10 @@ python upload_all.py
 | `--activate` | Google: make the purchase options active, i.e. purchasable (otherwise they stay as drafts) |
 | `--publish` | PlayFab: publish the items (otherwise they stay as drafts) |
 | `--config path` | use a different config file |
+| `--export folder` | use `<folder>/apple`, `<folder>/google` and `<folder>/playfab` instead of the config's paths (with `--vault NAME` and `--log-dir DIR`, no config file is needed) |
+| `--list` | print the export's items as one `@@items {json}` line and exit (the Unity window uses this) |
+| `--check-vault` | print `@@vault {json}`: whether your sign-in can read the vault, and exit |
+| `--progress` | also print `@@platform` / `@@item` status lines as the run goes (not written to the log) |
 
 Behaviour:
 - It checks every path in the config before starting, and (for real runs) that your Azure sign-in can read every secret the chosen platforms need, so a typo or a missing permission is reported up front.
@@ -176,30 +180,21 @@ Suggested first run: `python upload_all.py --dry-run`, then `python upload_all.p
 
 ---
 
-## 5b. The window: `upload_gui.py`
+## 5b. In Unity: the Upload section of DLC Store Export
 
-```
-python upload_gui.py
-```
+The upload window is part of the Unity package: **Build Utility > DLC Store Export**, section **Upload**, below Export. It runs `upload_all.py` in the background (with `--export`, `--progress` and the options you pick), so everything in sections 5 to 8 still applies: existing items are updated, the first failure stops the run, and one log file is written per run, to `Logs/iap-upload/` in the Unity project.
 
-To open it without a console, double-click **`Open IAP Uploader.bat`** (keep it in the same folder as the scripts; right-click it > Send to > Desktop (create shortcut) for a desktop icon). On the first run it installs any missing pip packages for you (and the Azure CLI through winget if it is missing). If the window can't start, the error is shown in a message box and saved to `gui_error.log`.
+- **Upload settings** (stored in the Store Export Settings asset, nothing secret): the Key Vault name, an optional Azure tenant for guest accounts, and the Python executable. **Install Python packages** runs the `pip install` from section 1.
+- An **Azure** line shows who is signed in and whether the vault can be read, with **Sign in to Azure**, **Check again** and **Sign out**. A dry run doesn't need it.
+- **Export**: the export to upload. After an export it is selected automatically; the list shows the `dlc-store-export-*` folders next to it, newest first, and **Browse** picks another one. **Reload** re-reads it after you edit a JSON file.
+- One box per store (Apple App Store, Google Play, PlayFab) listing its items with a tick box, ID, name, price or type, and a status that changes to Created / Updated / FAILED / Not processed as each item finishes. Items that can't be uploaded (unreadable file, missing Apple screenshot) are shown in red and can't be ticked. **All** / **None** tick or untick a store's items.
+- **Each store on its own**: every store box has its own **Dry run** and **Upload…** buttons, which send just that store's ticked items.
+- **Everything at once**: **Dry run all checked** and **Upload all checked…** send the ticked items of every store, in Apple, Google, PlayFab order.
+- Only ticked items are sent. When all of a store's items are ticked, that store is uploaded without an item filter.
+- **Google Play: make purchase options active** and **PlayFab: publish the items** are the `--activate` and `--publish` options.
+- Real uploads ask you to confirm first, showing how many items go to which store. **Cancel** ends the run immediately (the whole process tree); the item being uploaded at that moment can be left half done, so upload again to finish it.
 
-The window has:
-- an **Azure** line under the title showing who is signed in and whether the vault can be read (green when everything works), with **Sign in to Azure** (opens the browser sign-in), **Check again** and **Sign out** buttons. Sign in before a real upload; a dry run doesn't need it.
-- a list of every product found in your folders, grouped by store (Apple, Google Play, PlayFab), with its ID, name and price or type. A folder that can't be read, or an Apple product whose screenshot file is missing, is shown in red.
-- buttons **Upload to Apple App Store**, **Upload to Google Play**, **Upload to PlayFab** and **Upload ALL**
-- tick boxes: **Dry run** (check only, send nothing), **Google: make purchase options active**, **PlayFab: publish items**
-- a live log of what the upload is doing, and a **Status** column that changes to Created / Updated / FAILED / Not processed as each item finishes
-- **tick boxes** in the Upload column of each product (click the box, or select rows and press Space). Ticking a store heading ticks everything in that store, and **Select all products** above the list ticks or unticks every product. **Upload selected (N)** uploads just the ticked products, across any mix of stores (Apple, then Google, then PlayFab, stopping at the first failure). Products that can't be uploaded (shown in red) can't be ticked, and **Reload products** clears the ticks.
-- **right-click** a product to upload only that product (or select several in the same store with Ctrl or Shift, then right-click). Right-clicking a store heading offers to upload everything in that store. The Dry run, Google activate and PlayFab publish options still apply, and the other rows are left alone.
-- **Reload products** (re-reads the folders after you edit a JSON file), **Stop**, and **Clear log**, which empties the output window (it never touches the log files in the `logs` folder)
-- **Settings...**, which edits `upload_config.json` for you: type a path or use the Browse buttons for the Apple folder, Google file or folder, PlayFab folder, the Key Vault name and optional tenant, and the log folder. Paths inside the config's folder are saved as relative paths. If a path doesn't exist yet, you're asked before saving. After saving, the product list reloads. Other keys already in the file are kept.
-
-Real uploads ask you to confirm first, showing how many items go to which store. The window runs `upload_all.py` in the background, so everything in sections 5 to 8 still applies: existing items are updated, the first failure stops the run (the other stores show "Not run"), and the same log file is written to the `logs` folder (the path appears at the bottom of the window when the run ends).
-
-It uses Tkinter, which is included with the standard Windows Python installer from python.org (leave "tcl/tk and IDLE" ticked). If `python upload_gui.py` says `No module named 'tkinter'`, re-run the Python installer and choose Modify > tcl/tk and IDLE.
-
-**Stop** ends the run immediately. The product being uploaded at that moment can be left half done; upload again to finish it. Buttons are disabled while a run is in progress.
+The old Tkinter window (`upload_gui.py`, `Open IAP Uploader.bat`) has been removed. On the command line, `upload_all.py` and the three platform scripts work as before.
 
 ---
 
@@ -254,7 +249,9 @@ Nothing fails just because an item exists. The scripts create it if it's new, an
 | Apple price and availability | sent | sent again; if Apple answers "already exists" (409) it is noted as left unchanged |
 | Apple review screenshot | reserved, uploaded, committed | the existing screenshot is deleted and the new one uploaded. If Apple won't let the old one be deleted, it is kept, the screenshot steps are skipped, and a note is added (no failure) |
 | Google product | created | updated (the requests use `allowMissing`) |
-| PlayFab item | created as a draft | found by FriendlyId and updated |
+| PlayFab item | created as a draft | found by FriendlyId and updated; fields the file leaves out keep their PlayFab values (see below) |
+
+PlayFab updates merge rather than replace: the file's fields are written over the current draft, and everything else (images, start and end dates, hidden flag, tags, other display properties such as the thumbnail metadata) is kept. The draft's ETag is sent along, so a draft someone changed meanwhile fails instead of being overwritten. Release-wave dates come from the export: a file with `StartDate` / `EndDate` (DLC Store Export with release waves selected) sets them, a file without keeps the item's current dates. A file whose `DisplayProperties.dlcPump.scheduleId` differs from the draft's fails, as in the DLC PlayFab Review window. Dry runs and upload lines show each item's dates.
 
 Things that can't be changed after creation: Apple's product ID and product type, and Google's product ID. To rename a product ID, create a new product.
 
@@ -290,7 +287,7 @@ Apple note: a product that already exists is listed under "updated" even if none
 | Google 403 "API has not been used in project ..." | Enable the Google Play Android Developer API in the project named in the error, which should be the project shown in the "cloud project" line the script prints. If that's the wrong project, you're using the wrong key file. |
 | Google 403 "permission denied" after enabling the API | Invite the service account's email in Play Console > Users and permissions, with access to the app. It can take a while to take effect. |
 | PlayFab can't authenticate | Check the `playfab-title-id` and `playfab-secret-key` secrets in the vault. |
-| "Not signed in to Azure" | Run `az login` or click **Sign in to Azure** in the window. Sign-in expires after a while; just sign in again. |
+| "Not signed in to Azure" | Run `az login` or click **Sign in to Azure** in the Unity window. Sign-in expires after a while; just sign in again. |
 | "Your account can't read secrets in vault ..." | You need the **Key Vault Secrets User** role on the vault (ask the vault owner). It can take a few minutes to apply. If the vault has a firewall, your network must be allowed. |
 | "Secret '...' was not found" | The secret name in the vault differs from section 3a. |
 | "Could not reach https://....vault.azure.net" | The `keyvault_name` is wrong (use the name only, not the URL), or there is no internet connection. |

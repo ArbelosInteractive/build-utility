@@ -34,7 +34,7 @@ NEEDED = {
     "playfab": [PLAYFAB_TITLE_ID, PLAYFAB_SECRET_KEY],
 }
 
-SIGN_IN_HINT = "Sign in with `az login` (or the Sign in to Azure button in the window)."
+SIGN_IN_HINT = "Sign in with `az login` (or Sign in to Azure in Unity's DLC Store Export window)."
 
 
 class SecretError(Exception):
@@ -56,7 +56,7 @@ class Vault:
         name = (name or default_vault_name() or "").strip()
         if not name or name.startswith("YOUR_"):
             raise SecretError("No Key Vault name set. Put it in upload_config.json as "
-                              '"keyvault_name" (Settings... in the window), or pass --vault.')
+                              '"keyvault_name" (or the Key Vault name in Unity\'s Upload settings), or pass --vault.')
         try:
             from azure.identity import AzureCliCredential
             from azure.keyvault.secrets import SecretClient

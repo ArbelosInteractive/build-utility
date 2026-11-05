@@ -16,6 +16,13 @@ Usage:  python upload_all.py --dry-run
         python upload_all.py
         python upload_all.py --only google playfab
         python upload_all.py --activate --publish
+
+For the DLC Store Export window in Unity (no config file needed):
+        python upload_all.py --export <dlc-store-export folder> --vault <name> --log-dir <dir> --progress ...
+        python upload_all.py --export <folder> --list          print the items as one "@@items {json}" line
+        python upload_all.py --vault <name> --check-vault      print "@@vault {json}": can the signed-in user read it?
+--export uses <folder>/apple, <folder>/google and <folder>/playfab. --progress prints "@@platform" and "@@item"
+status lines while the run goes (they are not written to the log).
 """
 import argparse
 import datetime
@@ -26,8 +33,8 @@ import subprocess
 import sys
 from pathlib import Path
 
-from iap_common import setup_logging
-from iap_secrets import NEEDED, SecretError, Vault
+from iap_common import emit, setup_logging
+from iap_secrets import APPLE_KEY_ID, NEEDED, SecretError, Vault
 
 HERE = Path(__file__).resolve().parent
 ORDER = ["apple", "google", "playfab"]
@@ -125,10 +132,38 @@ def command(platform, cfg, args, log_path):
     return cmd
 
 
+def config_for_export(export, vault, log_dir):
+    """The settings for one export folder, without a config file (the Unity window's way of running)."""
+    export = Path(export).resolve()
+    return {"keyvault_name": (vault or "").strip(), "azure_tenant": "",
+            "apple_root": export / "apple", "google_input": export / "google", "playfab_input": export / "playfab",
+            "log_dir": Path(log_dir).resolve() if log_dir else HERE / "logs"}
+
+
+def check_vault(name):
+    """@@vault line: whether the signed-in Azure CLI user can read the vault. Never prints a secret."""
+    if not (name or "").strip():
+        print("@@vault " + json.dumps({"ok": False, "message": "no Key Vault name set"}), flush=True)
+        return 1
+    try:
+        Vault(name).get(APPLE_KEY_ID)
+        result = {"ok": True, "message": f"vault {name}: OK"}
+    except SecretError as e:
+        result = {"ok": False, "message": f"vault {name or '(none)'}: {str(e).splitlines()[0]}"}
+    print("@@vault " + json.dumps(result), flush=True)
+    return 0 if result["ok"] else 1
+
+
 def main():
     ap = argparse.ArgumentParser(description=__doc__, formatter_class=argparse.RawTextHelpFormatter)
     ap.add_argument("--config", type=Path, default=HERE / "upload_config.json",
                     help="paths file (default: upload_config.json next to this script)")
+    ap.add_argument("--export", type=Path, help="a dlc-store-export folder; replaces the config file's paths")
+    ap.add_argument("--vault", help="Key Vault name (with --export, or to override the config)")
+    ap.add_argument("--log-dir", type=Path, help="log folder (with --export, or to override the config)")
+    ap.add_argument("--list", action="store_true", help='print the items as one "@@items {json}" line and exit')
+    ap.add_argument("--check-vault", action="store_true", help='print "@@vault {json}" and exit')
+    ap.add_argument("--progress", action="store_true", help="print @@platform / @@item status lines")
     ap.add_argument("--only", nargs="+", choices=ORDER, metavar="PLATFORM",
                     help="run just these: apple google playfab (they still run in that order)")
     ap.add_argument("--item", nargs="+", metavar="ID",
@@ -147,12 +182,32 @@ def main():
     args.items = {p: getattr(args, f"{p}_item") for p in ORDER if getattr(args, f"{p}_item")}
     if args.item:
         args.items[args.only[0]] = args.item
-    cfg = load_config(args.config)
+
+    if args.check_vault:
+        vault = args.vault if args.vault is not None else (load_config(args.config)["keyvault_name"] if not args.export else "")
+        sys.exit(check_vault(vault))
+    if args.export:
+        cfg = config_for_export(args.export, args.vault, args.log_dir)
+    else:
+        cfg = load_config(args.config)
+        if args.vault is not None:
+            cfg["keyvault_name"] = args.vault.strip()
+        if args.log_dir:
+            cfg["log_dir"] = args.log_dir.resolve()
+    if args.list:
+        from iap_items import load_items
+        print("@@items " + json.dumps(load_items(cfg["apple_root"], cfg["google_input"], cfg["playfab_input"])), flush=True)
+        return
+    if args.progress:
+        os.environ["IAP_PROGRESS"] = "1"  # inherited by the platform scripts, read by iap_common
+        import iap_common
+        iap_common.PROGRESS = True
+
     log_path = cfg["log_dir"] / f"upload_all_{datetime.datetime.now():%Y-%m-%d_%H-%M-%S}.log"
     setup_logging("upload_all", log_path)
 
     platforms = [p for p in ORDER if not args.only or p in args.only]
-    print(f"Config:    {args.config}")
+    print(f"Export:    {args.export}" if args.export else f"Config:    {args.config}")
     print(f"Platforms: {', '.join(platforms)}" + ("   (dry run)" if args.dry_run else ""))
     for platform, key in (("apple", "apple_root"), ("google", "google_input"), ("playfab", "playfab_input")):
         if platform in platforms:
@@ -168,8 +223,12 @@ def main():
     completed = []
     for platform in platforms:
         print(f"\n######## {platform.upper()} ########", flush=True)
+        emit("platform", platform=platform, state="running")
         result = subprocess.run(command(platform, cfg, args, log_path))
         if result.returncode != 0:
+            emit("platform", platform=platform, state="failed")
+            for later in platforms[platforms.index(platform) + 1:]:
+                emit("platform", platform=later, state="not run")
             print(f"\nSTOPPED: {platform} failed (exit code {result.returncode}).")
             if completed:
                 print(f"Already finished before the failure: {', '.join(completed)}")
@@ -178,6 +237,7 @@ def main():
                 print(f"Not run: {', '.join(not_run)}")
             print(f"Log: {log_path}")
             sys.exit(1)
+        emit("platform", platform=platform, state="dry run OK" if args.dry_run else "done")
         completed.append(platform)
 
     print(f"\nAll done: {', '.join(completed)}" + ("  (dry run, nothing sent)" if args.dry_run else ""))

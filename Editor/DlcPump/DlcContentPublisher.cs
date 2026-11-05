@@ -107,14 +107,15 @@ public static class DlcContentPublisher
     /// <summary>Reads the remote folder (read-only). Returns null state and an error when it can't be read.</summary>
     public static async Task<(RemoteVersionState state, string error)> RemoteState(DlcPublishingSettings settings)
     {
+        string stateJson = null;
         var (code, output) = await Run(settings, new List<string> { "status", "--platform", CurrentPlatform,
-            "--app-version", CurrentAppVersion, "--state-json" }, false);
-        string line = output.Split('\n').Select(l => l.Trim()).FirstOrDefault(l => l.StartsWith("@@state ", StringComparison.Ordinal));
-        if (code != 0 || line == null)
+            "--app-version", CurrentAppVersion, "--state-json" }, false,
+            onMachine: (kind, json) => { if (kind == "state") stateJson = json; });
+        if (code != 0 || stateJson == null)
             return (null, output.Split('\n').Select(l => l.Trim()).LastOrDefault(l => l.StartsWith("error:"))?.Substring(6).Trim() ?? output.Trim());
         try
         {
-            var o = JObject.Parse(line.Substring("@@state ".Length));
+            var o = JObject.Parse(stateJson);
             return (new RemoteVersionState {
                 catalogs = o["catalogs"]?.Select(t => (string)t).ToList() ?? new List<string>(),
                 baseline = (bool?)o["baseline"] ?? false, products = (int?)o["products"] ?? 0 }, null);
@@ -129,86 +130,25 @@ public static class DlcContentPublisher
         Run(settings, new List<string> { "rollback", "--platform", CurrentPlatform, "--app-version", CurrentAppVersion,
             "--product", productId, drop ? "--drop" : "--to", version }, dryRun);
 
-    const string ProgressPrefix = "@@progress ";
-    static readonly TimeSpan IdleTimeout = TimeSpan.FromMinutes(10);
-
-    static async Task<(int code, string output)> Run(DlcPublishingSettings settings, List<string> args, bool dryRun,
-        Action<string> onLine = null, Action<DlcPublishProgress> onProgress = null, CancellationToken cancel = default)
+    static Task<(int code, string output)> Run(DlcPublishingSettings settings, List<string> args, bool dryRun,
+        Action<string> onLine = null, Action<DlcPublishProgress> onProgress = null, CancellationToken cancel = default,
+        Action<string, string> onMachine = null)
     {
-        if (string.IsNullOrWhiteSpace(settings.accountName)) return (1, $"accountName is empty in {settings.name}.");
-        var package = UnityEditor.PackageManager.PackageInfo.FindForAssembly(typeof(DlcContentPublisher).Assembly);
-        string script = Path.Combine(package.resolvedPath, "Tools~", "DlcPublisher", "publish_dlc.py");
-        args.InsertRange(0, new[] { script });
+        if (string.IsNullOrWhiteSpace(settings.accountName)) return Task.FromResult((1, $"accountName is empty in {settings.name}."));
+        args.InsertRange(0, new[] { DlcPythonProcess.PackageTool("DlcPublisher", "publish_dlc.py") });
         args.AddRange(new[] { "--account-url", settings.AccountUrl, "--container", settings.container,
             "--log-dir", Path.GetFullPath(Path.Combine("Logs", "dlc-publish")) });
         if (dryRun) args.Add("--dry-run");
-
-        var line = new StringBuilder();
-        foreach (string a in args) line.Append('"').Append(a.Replace("\"", "\\\"")).Append("\" ");
-        var start = new ProcessStartInfo(settings.pythonExecutable, line.ToString()) {
-            UseShellExecute = false, CreateNoWindow = true, RedirectStandardOutput = true, RedirectStandardError = true,
-            WorkingDirectory = Directory.GetCurrentDirectory() };
-        start.EnvironmentVariables["PYTHONUNBUFFERED"] = "1";
-        start.EnvironmentVariables["PYTHONIOENCODING"] = "utf-8";
-        // AzureCliCredential runs az itself; make sure it's found even if it was installed after Unity started.
-        string azDir = DlcAzureCli.Directory();
-        if (azDir != null) start.EnvironmentVariables["PATH"] = azDir + Path.PathSeparator + start.EnvironmentVariables["PATH"];
-        try
+        // No overall limit: big uploads take as long as they take. The runner stops only when cancelled, or when
+        // the script has printed nothing (not even progress) for 10 minutes.
+        return DlcPythonProcess.Run(settings.pythonExecutable, args, onLine, (kind, json) =>
         {
-            using (var process = Process.Start(start))
+            if (kind == "progress")
             {
-                var output = new StringBuilder();
-                long lastOutputTicks = DateTime.UtcNow.Ticks;
-
-                async Task Pump(StreamReader reader)
-                {
-                    string l;
-                    while ((l = await reader.ReadLineAsync()) != null)
-                    {
-                        Interlocked.Exchange(ref lastOutputTicks, DateTime.UtcNow.Ticks);
-                        if (l.StartsWith(ProgressPrefix, StringComparison.Ordinal))
-                        {
-                            var progress = DlcPublishProgress.Parse(l.Substring(ProgressPrefix.Length));
-                            if (progress != null) onProgress?.Invoke(progress);
-                            continue;
-                        }
-                        lock (output) output.Append(l).Append('\n');
-                        onLine?.Invoke(l);
-                    }
-                }
-
-                var stdout = Task.Run(() => Pump(process.StandardOutput));
-                var stderr = Task.Run(() => Pump(process.StandardError));
-
-                // No overall limit: big uploads take as long as they take. Stop only when cancelled, or when the
-                // script has printed nothing (not even progress) for IdleTimeout.
-                string stopped = await Task.Run(() =>
-                {
-                    while (!process.WaitForExit(500))
-                    {
-                        if (cancel.IsCancellationRequested) return "Cancelled.";
-                        if (DateTime.UtcNow - new DateTime(Interlocked.Read(ref lastOutputTicks), DateTimeKind.Utc) > IdleTimeout)
-                            return $"No output for {IdleTimeout.TotalMinutes:0} minutes; stopped.";
-                    }
-                    return null;
-                });
-                if (stopped != null)
-                {
-                    try { process.Kill(); } catch (InvalidOperationException) { /* already exited */ }
-                    process.WaitForExit(5000);
-                }
-                await Task.WhenAny(Task.WhenAll(stdout, stderr), Task.Delay(5000));
-
-                string text;
-                lock (output) text = output.ToString();
-                if (stopped == null) return (process.ExitCode, text);
-                return (1, text + "\n" + stopped + " Anything uploaded so far stays; publish again to continue " +
-                           "(identical files are skipped). Check Logs/dlc-publish for details.");
+                var progress = DlcPublishProgress.Parse(json);
+                if (progress != null) onProgress?.Invoke(progress);
             }
-        }
-        catch (Exception e)
-        {
-            return (1, $"Couldn't run '{settings.pythonExecutable}': {e.Message}. Set pythonExecutable in {settings.name}.");
-        }
+            else onMachine?.Invoke(kind, json);
+        }, cancel, TimeSpan.FromMinutes(10));
     }
 }

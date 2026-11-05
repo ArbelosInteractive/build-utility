@@ -26,8 +26,9 @@ public sealed class DlcPlayFabWindow : EditorWindow
     bool busy;
     [MenuItem("Build Utility/DLC PlayFab Review")]
     public static void Open() => GetWindow<DlcPlayFabWindow>("DLC PlayFab Review");
-    public static void ForSchedule(DlcWaveSchedule value) { var w = GetWindow<DlcPlayFabWindow>("DLC PlayFab Review"); w.schedule = value; w.changes = null; w.CreateGUI(); }
-    public static void ForIcon(DlcIconDocument value) { var w = GetWindow<DlcPlayFabWindow>("DLC PlayFab Review"); w.icon = value; w.changes = null; w.CreateGUI(); }
+    // Each entry point reviews only its own change: from Release Waves the schedule (no icon), from a release's icon the icon (no schedule).
+    public static void ForSchedule(DlcWaveSchedule value) { var w = GetWindow<DlcPlayFabWindow>("DLC PlayFab Review"); w.schedule = value; w.icon = null; w.changes = null; w.CreateGUI(); }
+    public static void ForIcon(DlcIconDocument value) { var w = GetWindow<DlcPlayFabWindow>("DLC PlayFab Review"); w.icon = value; w.schedule = null; w.changes = null; w.CreateGUI(); }
     void OnDisable() { cancellation?.Cancel(); client?.Dispose(); client = null; }
     public void CreateGUI()
     {
