@@ -21,13 +21,20 @@ different wave schedule than the draft's fails, like the DLC PlayFab Review wind
 The first error stops the run. A summary of created / updated items is printed and written
 to a log file (logs\playfab_<date>_<time>.log, or --log-file).
 
-Credentials: read from Azure Key Vault (secrets playfab-title-id, playfab-secret-key).
+Targets: --target staging (the default) uploads to the staging title, --target production to the
+real one. Every item a staging upload sends is recorded in playfab-staging-receipt.json next to
+the input folder (the export root), with a hash of its file. A production upload only runs when
+every selected item is in that receipt with the same hash, i.e. exactly this file went to staging
+first. --skip-staging-check turns the check off (for items that were tested some other way).
+
+Credentials: read from Azure Key Vault. Staging: playfab-staging-title-id, playfab-staging-secret-key;
+             production: playfab-title-id, playfab-secret-key.
              The vault name comes from upload_config.json or --vault; sign in with `az login`.
 Install:     pip install requests azure-identity azure-keyvault-secrets
 Usage:       python upload_playfab_items.py --input .\playfab --dry-run
-             python upload_playfab_items.py --input .\playfab
+             python upload_playfab_items.py --input .\playfab --publish                     (staging)
              python upload_playfab_items.py --input .\playfab --only wrestler_jazz
-             python upload_playfab_items.py --input .\playfab --publish
+             python upload_playfab_items.py --input .\playfab --target production --publish
 
 Items stay as drafts unless you pass --publish (which sets "Publish": true on each call).
 """
@@ -41,7 +48,8 @@ from pathlib import Path
 import requests
 
 from iap_common import Report, setup_logging
-from iap_secrets import PLAYFAB_SECRET_KEY, PLAYFAB_TITLE_ID, SecretError, Vault
+from iap_secrets import PLAYFAB_TARGETS, SecretError, Vault
+from iap_staging import receipt_path, record_staging, untested
 
 ALT_TYPE = "FriendlyId"
 
@@ -100,10 +108,10 @@ class PlayFab:
 
 
 # ---------------------------------------------------------------- loading
-def load_credentials(vault):
-    """Read the title ID and secret key from Key Vault."""
-    return {"title_id": vault.get_text(PLAYFAB_TITLE_ID),
-            "secret_key": vault.get_text(PLAYFAB_SECRET_KEY)}
+def load_credentials(vault, target="production"):
+    """Read the target's title ID and secret key from Key Vault."""
+    title_secret, key_secret = PLAYFAB_TARGETS[target]
+    return {"title_id": vault.get_text(title_secret), "secret_key": vault.get_text(key_secret)}
 
 
 def friendly_id(body):
@@ -204,6 +212,10 @@ def main():
     ap.add_argument("--log-file", type=Path, help="append to this log file instead of starting a new one")
     ap.add_argument("--publish", action="store_true",
                     help="publish each item immediately instead of leaving it as a draft")
+    ap.add_argument("--target", choices=sorted(PLAYFAB_TARGETS), default="staging",
+                    help="which PlayFab title to upload to (default: staging)")
+    ap.add_argument("--skip-staging-check", action="store_true",
+                    help="production only: upload even if items weren't uploaded to staging first")
     ap.add_argument("--dry-run", action="store_true", help="validate and print, call nothing")
     args = ap.parse_args()
     setup_logging("playfab", args.log_file)
@@ -221,6 +233,21 @@ def main():
     if not items:
         sys.exit("No items to upload.")
 
+    receipt = receipt_path(args.input)
+    print(f"Target: {args.target.upper()} PlayFab title")
+    if args.target == "production":
+        missing = untested(receipt, items)
+        if missing and not args.skip_staging_check:
+            print(f"Not tested on staging (receipt: {receipt}):")
+            for fid, reason in missing:
+                print(f"  - {fid}: {reason}")
+            sys.exit(f"{len(missing)} of {len(items)} item(s) haven't been uploaded to the staging title as they are "
+                     "now. Upload them to staging and test them first, or pass --skip-staging-check.")
+        if missing:
+            print(f"WARNING: {len(missing)} item(s) not tested on staging; uploading anyway (--skip-staging-check).")
+        else:
+            print(f"Staging check: all {len(items)} item(s) match their staging upload.")
+
     if args.dry_run:
         for f, fid, body in items:
             item = body["Item"]
@@ -230,11 +257,16 @@ def main():
         return
 
     try:
-        creds = load_credentials(Vault(args.vault))
+        creds = load_credentials(Vault(args.vault), args.target)
+        if args.target == "production":
+            staging_title = load_credentials(Vault(args.vault), "staging")["title_id"]
+            if staging_title.lower() == creds["title_id"].lower():
+                sys.exit("playfab-title-id and playfab-staging-title-id are the same title. "
+                         "Fix the secrets in the vault before uploading.")
     except SecretError as e:
         sys.exit(str(e))
     client = PlayFab(creds["title_id"], creds["secret_key"])
-    print(f"Title {creds['title_id']}")
+    print(f"Title {creds['title_id']} ({args.target})")
     try:
         client.login()
     except ApiError as e:
@@ -257,6 +289,8 @@ def main():
                 resp = client.call("/Catalog/CreateDraftItem", body)
                 report.created.append(fid)
                 print(f"  {fid}: created new (id {(resp.get('Item') or {}).get('Id', '?')}){describe_dates(body['Item'])}")
+            if args.target == "staging":
+                record_staging(receipt, creds["title_id"], fid, items[n][2], args.publish)
         except (ApiError, ValueError) as e:  # the first failure stops the run
             print(f"  FAILED: {fid} ({f.name}): {e}")
             report.failed.append(f"{fid} ({f.name}): {e}")
@@ -266,6 +300,8 @@ def main():
 
     if not args.publish:
         report.notes.append("items are drafts; use --publish or publish them in Game Manager")
+    if args.target == "staging":
+        report.notes.append(f"recorded in {receipt.name}; once tested, upload the same export with --target production")
     report.print()
 
 

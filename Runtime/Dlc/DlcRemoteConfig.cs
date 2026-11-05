@@ -17,9 +17,18 @@ namespace Arbelos.BuildUtility.Runtime
     [CreateAssetMenu(menuName = "Build Utility/DLC Remote Config")]
     public sealed class DlcRemoteConfig : ScriptableObject
     {
-        [Tooltip("Public URL of the dlc-content container root, normally the CDN endpoint, e.g. https://example.azurefd.net/dlc-content. " +
-                 "The service appends /<Platform>/<Application.version>/. Must match the Addressables Remote.LoadPath prefix.")]
+        [Tooltip("PRODUCTION: public URL of the production container root, normally the CDN endpoint, e.g. " +
+                 "https://example.azurefd.net/dlc-production. The service appends /<Platform>/<Application.version>/. " +
+                 "Store builds read this one.")]
         public string cdnBaseUrl = "";
+
+        [Tooltip("STAGING: public URL of the staging container root, e.g. https://example.azurefd.net/dlc-staging. " +
+                 "Read only when DlcEnvironment.UseStaging(true) was called (staging builds, or the Editor's staging " +
+                 "Play Mode). Left empty, staging loads no DLC instead of falling back to production.")]
+        public string stagingCdnBaseUrl = "";
+
+        /// <summary>The URL for the current <see cref="DlcEnvironment"/>, without a trailing slash.</summary>
+        public string ActiveBaseUrl => DlcEnvironment.BaseUrl(this);
 
         public DlcContentAccessMode accessMode = DlcContentAccessMode.PublicRead;
 

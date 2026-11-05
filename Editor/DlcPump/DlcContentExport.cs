@@ -167,10 +167,12 @@ public static class DlcContentExport
         string buildPath = (settings.RemoteCatalogBuildPath.GetValue(settings.profileSettings, profileId) ?? "").Replace('\\', '/').TrimEnd('/');
         if (!r.remoteLoadPath.EndsWith(suffix, StringComparison.Ordinal))
             r.errors.Add($"Remote.LoadPath of profile '{r.profileName}' is '{r.remoteLoadPath}'. It must end with '{suffix}': set it to <cdn>/[BuildTarget]/[UnityEngine.Application.version].");
-        string cdn = (publishing.cdnBaseUrl ?? "").Trim().TrimEnd('/');
-        if (cdn.Length == 0) r.errors.Add($"cdnBaseUrl is empty in {publishing.name}.");
-        else if (r.remoteLoadPath != cdn + suffix)
-            r.errors.Add($"Remote.LoadPath '{r.remoteLoadPath}' doesn't match cdnBaseUrl: expected '{cdn + suffix}'.");
+        // The URL is read at runtime, so the same catalog works from the staging and the production container.
+        if (r.remoteLoadPath != DlcEnvironment.LoadPathToken + suffix)
+            r.warnings.Add($"Remote.LoadPath of profile '{r.profileName}' is the fixed URL '{r.remoteLoadPath}', not '{DlcEnvironment.RemoteLoadPath}'. " +
+                           "This build loads from that URL whichever container it's published or promoted to. Fine for content updates of an app " +
+                           "version that shipped with it; use the runtime content URL for new app versions.");
+        CheckRemoteConfig(publishing, r.errors, r.warnings);
         if (!buildPath.EndsWith(suffix, StringComparison.Ordinal))
             r.errors.Add($"Remote.BuildPath of profile '{r.profileName}' is '{buildPath}'. It must end with '{suffix}', e.g. ServerData/[BuildTarget]/[UnityEngine.Application.version].");
 
@@ -185,6 +187,32 @@ public static class DlcContentExport
         r.catalogFile = Path.GetFileName(catalogs[0]);
         r.hashFile = Path.GetFileName(hash);
         r.catalogBuild = File.ReadAllText(hash).Trim();
+    }
+
+    /// <summary>The DlcRemoteConfig in a Resources folder, the one the game loads; null when there is none.</summary>
+    public static DlcRemoteConfig RemoteConfig() =>
+        AssetDatabase.FindAssets("t:" + nameof(DlcRemoteConfig)).Select(AssetDatabase.GUIDToAssetPath)
+            .Where(p => p.Replace('\\', '/').Contains("/Resources/") && Path.GetFileNameWithoutExtension(p) == "DlcRemoteConfig")
+            .Select(AssetDatabase.LoadAssetAtPath<DlcRemoteConfig>).FirstOrDefault(c => c);
+
+    /// <summary>Both runtime URLs set, and pointing at the publishing settings' containers.</summary>
+    public static void CheckRemoteConfig(DlcPublishingSettings publishing, List<string> errors, List<string> warnings)
+    {
+        var remote = RemoteConfig();
+        if (!remote) { errors.Add("No Resources/DlcRemoteConfig asset. Create one (Build Utility/DLC Remote Config) with the staging and production URLs."); return; }
+        void Check(string url, string field, string container)
+        {
+            url = (url ?? "").Trim().TrimEnd('/');
+            if (url.Length == 0) errors.Add($"DlcRemoteConfig.{field} is empty.");
+            else if (!string.IsNullOrWhiteSpace(container) && !url.EndsWith("/" + container.Trim(), StringComparison.Ordinal))
+                warnings.Add($"DlcRemoteConfig.{field} is '{url}', which doesn't end with the container '{container}'. Check that the CDN serves that container there.");
+        }
+        Check(remote.stagingCdnBaseUrl, nameof(remote.stagingCdnBaseUrl), publishing.container);
+        Check(remote.cdnBaseUrl, nameof(remote.cdnBaseUrl), publishing.productionContainer);
+        if (string.Equals((remote.cdnBaseUrl ?? "").Trim().TrimEnd('/'), (remote.stagingCdnBaseUrl ?? "").Trim().TrimEnd('/'), StringComparison.OrdinalIgnoreCase))
+            errors.Add("DlcRemoteConfig has the same URL for staging and production. Store builds must read the production container.");
+        if (string.Equals((publishing.container ?? "").Trim(), (publishing.productionContainer ?? "").Trim(), StringComparison.Ordinal))
+            errors.Add($"{publishing.name}: the staging and production containers are the same.");
     }
 
     /// <summary>

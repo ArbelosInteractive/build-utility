@@ -39,6 +39,9 @@ class FakeStore:
         self.blobs[name] = (body, f"etag{self.counter}")
         self.writes.append(name)
 
+    def copy_from(self, source, name, create_only=False):
+        self.write(name, source.blobs[name][0], "", "", create_only=create_only)
+
 
 class PublishTests(unittest.TestCase):
     @classmethod
@@ -343,6 +346,57 @@ class PublishTests(unittest.TestCase):
         self.store.blobs[self.BASELINE] = (b"state-1", "e1")
         self.assertEqual(0, self.run_cmd(*base))
         self.assertEqual(b"state-1", out.read_bytes())
+    def promote_cmd(self, production, *args):
+        stores = {"dlc-staging": self.store, "dlc-production": production}
+        return p.main(["promote", "--container", "dlc-staging", "--to-container", "dlc-production", "--platform",
+                       "Android", "--app-version", "1.4.0", "--account-url", "https://x.blob.core.windows.net",
+                       "--log-dir", str(self.tmp / "logs")] + list(args),
+                      store_factory=lambda url, container: stores[container])
+
+    def test_promote_copies_published_version_in_order(self):
+        stage = self.export({"wrestler_jazz": ["Jazz/Main"], "wrestler_x": ["X/Main"]}, content_state=b"state")
+        self.assertEqual(0, self.run_cmd("publish", "--staging", str(stage)))
+        prod = FakeStore()
+        self.assertEqual(0, self.promote_cmd(prod))
+        pre = "Android/1.4.0/"
+        self.assertEqual(self.store.blobs[pre + "skins_assets_all_ff00.bundle"][0], prod.blobs[pre + "skins_assets_all_ff00.bundle"][0])
+        self.assertEqual(self.store.blobs[pre + "wrestler_jazz/v1/product.json"][0], prod.blobs[pre + "wrestler_jazz/v1/product.json"][0])
+        self.assertEqual(pre + "products.json", prod.writes[-1])
+        self.assertLess(prod.writes.index(pre + "skins_assets_all_ff00.bundle"), prod.writes.index(pre + "catalog_1.bin"))
+        self.assertLess(prod.writes.index(pre + "catalog_1.hash"), prod.writes.index(pre + "wrestler_jazz/v1/product.json"))
+        self.assertFalse(any(n.startswith("_build-state") for n in prod.blobs))
+        index = json.loads(prod.blobs[pre + "products.json"][0])
+        self.assertEqual(["wrestler_jazz", "wrestler_x"], [e["productId"] for e in index["products"]])
+        self.assertEqual("abc123", index["catalogBuild"])
+        # Promoting again copies nothing new but products.json.
+        prod.writes.clear()
+        self.assertEqual(0, self.promote_cmd(prod))
+        self.assertEqual([pre + "products.json"], prod.writes)
+
+    def test_promote_selected_products_keeps_other_production_entries(self):
+        stage = self.export({"wrestler_jazz": ["Jazz/Main"], "wrestler_x": ["X/Main"]})
+        self.assertEqual(0, self.run_cmd("publish", "--staging", str(stage)))
+        prod = FakeStore()
+        self.assertEqual(0, self.promote_cmd(prod, "--product", "wrestler_x"))
+        index = json.loads(prod.blobs["Android/1.4.0/products.json"][0])
+        self.assertEqual(["wrestler_x"], [e["productId"] for e in index["products"]])
+        self.assertNotIn("Android/1.4.0/wrestler_jazz/v1/product.json", prod.blobs)
+        self.assertEqual(1, self.promote_cmd(prod, "--product", "nope"))
+
+    def test_promote_dry_run_and_conflicting_bundle(self):
+        stage = self.export({"wrestler_jazz": ["Jazz/Main"]})
+        self.assertEqual(0, self.run_cmd("publish", "--staging", str(stage)))
+        prod = FakeStore()
+        self.assertEqual(0, self.promote_cmd(prod, "--dry-run"))
+        self.assertEqual({}, prod.blobs)
+        prod.blobs["Android/1.4.0/skins_assets_all_ff00.bundle"] = (b"other", "e")
+        self.assertEqual(1, self.promote_cmd(prod))
+        self.assertNotIn("Android/1.4.0/products.json", prod.blobs)
+        self.assertNotIn("Android/1.4.0/catalog_1.bin", prod.blobs)
+
+    def test_promote_needs_a_published_source(self):
+        self.assertEqual(1, self.promote_cmd(FakeStore()))
+
     def test_status_state_json(self):
         import contextlib, io
         base = ["status", "--platform", "Android", "--app-version", "1.4.0", "--state-json"]

@@ -16,6 +16,12 @@ Usage:  python upload_all.py --dry-run
         python upload_all.py
         python upload_all.py --only google playfab
         python upload_all.py --activate --publish
+        python upload_all.py --only playfab --publish                          (PlayFab staging title, the default)
+        python upload_all.py --only playfab --playfab-target production --publish
+
+PlayFab goes to the staging title unless --playfab-target production is given; production only accepts
+items whose exact file was uploaded to staging first (see upload_playfab_items.py). Apple and Google
+have no staging stores, so --playfab-target doesn't affect them.
 
 For the DLC Store Export window in Unity (no config file needed):
         python upload_all.py --export <dlc-store-export folder> --vault <name> --log-dir <dir> --progress ...
@@ -34,7 +40,7 @@ import sys
 from pathlib import Path
 
 from iap_common import emit, setup_logging
-from iap_secrets import APPLE_KEY_ID, NEEDED, SecretError, Vault
+from iap_secrets import APPLE_KEY_ID, PLAYFAB_TARGETS, SecretError, Vault, needed
 
 HERE = Path(__file__).resolve().parent
 ORDER = ["apple", "google", "playfab"]
@@ -83,7 +89,7 @@ def load_config(path):
     return out
 
 
-def preflight(cfg, platforms, dry_run):
+def preflight(cfg, platforms, dry_run, playfab_target="staging"):
     """Check every path before anything runs, so a typo doesn't stop us half way through."""
     needs = {"apple": "apple_root", "google": "google_input", "playfab": "playfab_input"}
     problems = []
@@ -97,10 +103,10 @@ def preflight(cfg, platforms, dry_run):
     if not dry_run:  # a dry run sends nothing, so it needs no credentials
         try:
             vault = Vault(cfg["keyvault_name"])
-            for platform in platforms:
-                for secret in NEEDED[platform]:
-                    vault.get(secret)
-            print(f"Key Vault {vault.name}: all {sum(len(NEEDED[p]) for p in platforms)} secret(s) readable")
+            secrets = [s for p in platforms for s in needed(p, playfab_target)]
+            for secret in secrets:
+                vault.get(secret)
+            print(f"Key Vault {vault.name}: all {len(secrets)} secret(s) readable")
         except SecretError as e:
             problems.append(str(e))
     return problems
@@ -124,6 +130,9 @@ def command(platform, cfg, args, log_path):
             cmd += ["--only", *args.items["playfab"]]
         if args.publish:
             cmd.append("--publish")
+        cmd += ["--target", args.playfab_target]
+        if args.skip_staging_check:
+            cmd.append("--skip-staging-check")
     if cfg["keyvault_name"]:
         cmd += ["--vault", cfg["keyvault_name"]]
     cmd += ["--log-file", str(log_path)]
@@ -146,8 +155,15 @@ def check_vault(name):
         print("@@vault " + json.dumps({"ok": False, "message": "no Key Vault name set"}), flush=True)
         return 1
     try:
-        Vault(name).get(APPLE_KEY_ID)
+        vault = Vault(name)
+        vault.get(APPLE_KEY_ID)
         result = {"ok": True, "message": f"vault {name}: OK"}
+        # Which PlayFab titles the vault can upload to (names only; secrets are never printed).
+        for target, (title_secret, _) in PLAYFAB_TARGETS.items():
+            try:
+                result[f"{target}TitleId"] = vault.get_text(title_secret)
+            except SecretError:
+                result[f"{target}TitleId"] = ""
     except SecretError as e:
         result = {"ok": False, "message": f"vault {name or '(none)'}: {str(e).splitlines()[0]}"}
     print("@@vault " + json.dumps(result), flush=True)
@@ -174,6 +190,10 @@ def main():
                         help=f"like --item, but just for {name}; can be combined across platforms")
     ap.add_argument("--activate", action="store_true", help="Google: make purchase options active")
     ap.add_argument("--publish", action="store_true", help="PlayFab: publish items instead of leaving drafts")
+    ap.add_argument("--playfab-target", choices=sorted(PLAYFAB_TARGETS), default="staging",
+                    help="PlayFab title to upload to (default: staging)")
+    ap.add_argument("--skip-staging-check", action="store_true",
+                    help="PlayFab production: don't require a matching staging upload first")
     ap.add_argument("--dry-run", action="store_true", help="validate and print only, nothing is sent")
     args = ap.parse_args()
 
@@ -209,11 +229,13 @@ def main():
     platforms = [p for p in ORDER if not args.only or p in args.only]
     print(f"Export:    {args.export}" if args.export else f"Config:    {args.config}")
     print(f"Platforms: {', '.join(platforms)}" + ("   (dry run)" if args.dry_run else ""))
+    if "playfab" in platforms:
+        print(f"PlayFab:   {args.playfab_target.upper()} title")
     for platform, key in (("apple", "apple_root"), ("google", "google_input"), ("playfab", "playfab_input")):
         if platform in platforms:
             print(f"  {platform:<8} {cfg[key]}")
 
-    problems = preflight(cfg, platforms, args.dry_run)
+    problems = preflight(cfg, platforms, args.dry_run, args.playfab_target)
     if problems:
         print("\nCannot start:")
         for p in problems:

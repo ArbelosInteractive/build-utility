@@ -253,6 +253,10 @@ Nothing fails just because an item exists. The scripts create it if it's new, an
 
 PlayFab updates merge rather than replace: the file's fields are written over the current draft, and everything else (images, start and end dates, hidden flag, tags, other display properties such as the thumbnail metadata) is kept. The draft's ETag is sent along, so a draft someone changed meanwhile fails instead of being overwritten. Release-wave dates come from the export: a file with `StartDate` / `EndDate` (DLC Store Export with release waves selected) sets them, a file without keeps the item's current dates. A file whose `DisplayProperties.dlcPump.scheduleId` differs from the draft's fails, as in the DLC PlayFab Review window. Dry runs and upload lines show each item's dates.
 
+**Staging and production PlayFab titles.** PlayFab uploads go to the staging title unless you choose production (**PlayFab title** in DLC Store Export, or `--playfab-target production`). Each staging upload records the items it sent in `playfab-staging-receipt.json` in the export folder, with a hash of each item's file. A production upload only starts when every item it would send is in that receipt with the same hash, so production gets exactly the file you tested; otherwise it lists the items and sends nothing. `--skip-staging-check` (a tick box in the window) turns this off. The window shows each PlayFab item as *on staging*, *changed since staging* or *not on staging*. Publish on staging (`--publish`) to see items in a staging build: the game reads published items only. Apple and Google have no staging stores; their uploads always go to the real stores as drafts / inactive purchase options.
+
+Key Vault secrets for the two titles: `playfab-staging-title-id` and `playfab-staging-secret-key` (staging), `playfab-title-id` and `playfab-secret-key` (production). The upload stops if both title IDs are the same.
+
 Things that can't be changed after creation: Apple's product ID and product type, and Google's product ID. To rename a product ID, create a new product.
 
 The first real error (anything that isn't one of the "already exists" cases above) stops the run.

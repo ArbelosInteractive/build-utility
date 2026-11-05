@@ -9,8 +9,10 @@ The vault must hold these secrets (names may only use letters, digits and hyphen
     apple-issuer-id         App Store Connect issuer ID
     apple-p8                the full text of the AuthKey_XXXX.p8 file
     google-service-account  the full service account JSON
-    playfab-title-id        PlayFab title ID
-    playfab-secret-key      PlayFab secret key
+    playfab-title-id        PlayFab title ID (production)
+    playfab-secret-key      PlayFab secret key (production)
+    playfab-staging-title-id    staging PlayFab title ID     (for --playfab-target staging)
+    playfab-staging-secret-key  staging PlayFab secret key
 
 The vault name comes from `keyvault_name` in upload_config.json (or --vault on each script).
 Install: pip install azure-identity azure-keyvault-secrets
@@ -27,12 +29,25 @@ APPLE_P8 = "apple-p8"
 GOOGLE_SERVICE_ACCOUNT = "google-service-account"
 PLAYFAB_TITLE_ID = "playfab-title-id"
 PLAYFAB_SECRET_KEY = "playfab-secret-key"
+PLAYFAB_STAGING_TITLE_ID = "playfab-staging-title-id"
+PLAYFAB_STAGING_SECRET_KEY = "playfab-staging-secret-key"
+
+# (title ID secret, secret key secret) per PlayFab target.
+PLAYFAB_TARGETS = {
+    "staging": (PLAYFAB_STAGING_TITLE_ID, PLAYFAB_STAGING_SECRET_KEY),
+    "production": (PLAYFAB_TITLE_ID, PLAYFAB_SECRET_KEY),
+}
 
 NEEDED = {
     "apple": [APPLE_KEY_ID, APPLE_ISSUER_ID, APPLE_P8],
     "google": [GOOGLE_SERVICE_ACCOUNT],
     "playfab": [PLAYFAB_TITLE_ID, PLAYFAB_SECRET_KEY],
 }
+
+
+def needed(platform, playfab_target="production"):
+    """The secrets one platform's upload reads."""
+    return list(PLAYFAB_TARGETS[playfab_target]) if platform == "playfab" else NEEDED[platform]
 
 SIGN_IN_HINT = "Sign in with `az login` (or Sign in to Azure in Unity's DLC Store Export window)."
 

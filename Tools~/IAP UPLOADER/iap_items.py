@@ -75,17 +75,21 @@ def load_google(target):
 
 
 def load_playfab(target):
+    from iap_staging import receipt_path, staged_state
     target = Path(target)
     files = [target] if target.is_file() else (sorted(target.rglob("*.json")) if target.is_dir() else [])
+    receipt = receipt_path(target)
     items = []
     for f in files:
         if "credentials" in f.name.lower():
             continue
         try:
-            item = _read(f)["Item"]
+            body = _read(f)
+            item = body["Item"]
             fid = next(a["Value"] for a in item["AlternateIds"] if a.get("Type") == "FriendlyId")
             items.append({"key": fid, "arg": fid, "id": fid, "name": item.get("Title", {}).get("NEUTRAL", ""),
-                          "details": item.get("ContentType", ""), "problem": None})
+                          "details": item.get("ContentType", ""), "problem": None,
+                          "staged": staged_state(receipt, fid, body)})
         except Exception as e:
             items.append(_broken(f.name, e))
     return items

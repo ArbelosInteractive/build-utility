@@ -17,7 +17,7 @@ public sealed class DlcPublishWindow : EditorWindow
 
     [SerializeField] DlcPublishingSettings settings;
     [SerializeField] DlcReleaseListView list = new DlcReleaseListView();
-    [SerializeField] bool showSettings = true, showRollback, onlyCheckedProducts = true;
+    [SerializeField] bool showSettings = true, showRollback, onlyCheckedProducts = true, rollbackProduction, promoteAllowNewCatalog;
     [SerializeField] string report = "";
     [SerializeField] string rollbackProduct = "", rollbackVersion = "v1";
     [SerializeField] int rollbackMode;  // 0 = make current, 1 = drop
@@ -139,6 +139,8 @@ public sealed class DlcPublishWindow : EditorWindow
             EditorGUILayout.Space();
             DrawPublish();
             EditorGUILayout.Space();
+            DrawPromote();
+            EditorGUILayout.Space();
             DrawRollback();
         }
         EditorGUILayout.Space();
@@ -155,7 +157,8 @@ public sealed class DlcPublishWindow : EditorWindow
     {
         EditorGUILayout.LabelField("DLC Publish", new GUIStyle(EditorStyles.boldLabel) { fontSize = 18 }, GUILayout.Height(24));
         EditorGUILayout.HelpBox(
-            "1. Check releases, then Build (full or content update, as suggested).  2. Export.  3. Publish dry run, then Publish.\n" +
+            "1. Check releases, then Build (full or content update, as suggested).  2. Export.  3. Publish to STAGING (dry run first).  " +
+            "4. Test with a staging build or the staging Play Mode.  5. Promote to production.\n" +
             "Uploads go to <container>/<Platform>/<appVersion>/ as the Azure user signed in below (Storage Blob Data Contributor). No keys are stored. See Documentation~/DLC-CONTENT.md.",
             MessageType.Info);
     }
@@ -190,7 +193,8 @@ public sealed class DlcPublishWindow : EditorWindow
             }
         }
         EditorGUILayout.LabelField("Platform / app version", $"{DlcContentPublisher.CurrentPlatform}  /  {DlcContentPublisher.CurrentAppVersion}");
-        EditorGUILayout.LabelField("Destination", DlcContentPublisher.Destination(settings), EditorStyles.wordWrappedLabel);
+        EditorGUILayout.LabelField("Staging (Publish)", DlcContentPublisher.Destination(settings), EditorStyles.wordWrappedLabel);
+        EditorGUILayout.LabelField("Production (Promote)", DlcContentPublisher.ProductionDestination(settings), EditorStyles.wordWrappedLabel);
         DrawAzure();
     }
 
@@ -351,6 +355,21 @@ public sealed class DlcPublishWindow : EditorWindow
         var picked = Checked();
         string profileError = picked.Count > 0 ? DlcAddressablesBuild.CheckProfile(picked, out _) : null;
         if (profileError != null) EditorGUILayout.HelpBox(profileError, MessageType.Warning);
+        string loadPathWarning = DlcAddressablesBuild.LoadPathWarning();
+        if (loadPathWarning != null)
+            using (new EditorGUILayout.HorizontalScope())
+            {
+                EditorGUILayout.HelpBox(loadPathWarning, MessageType.Warning);
+                if (GUILayout.Button("Use runtime\ncontent URL", GUILayout.Width(110), GUILayout.Height(52)) &&
+                    EditorUtility.DisplayDialog("Use the runtime content URL",
+                        $"Set Remote.LoadPath of the active Addressables profile to\n{Arbelos.BuildUtility.Runtime.DlcEnvironment.RemoteLoadPath}?\n\n" +
+                        "Only for an app version that hasn't shipped with the fixed URL. Build again (full build for a new app version) afterwards.",
+                        "Change it", "Cancel"))
+                {
+                    try { report = "Remote.LoadPath was: " + DlcAddressablesBuild.UseRuntimeLoadPath() + "\nnow: " + Arbelos.BuildUtility.Runtime.DlcEnvironment.RemoteLoadPath; }
+                    catch (Exception e) { report = "Couldn't change Remote.LoadPath: " + e.Message; }
+                }
+            }
         using (new EditorGUI.DisabledScope(picked.Count == 0 || profileError != null))
         using (new EditorGUILayout.HorizontalScope())
         {
@@ -485,7 +504,7 @@ public sealed class DlcPublishWindow : EditorWindow
 
     void DrawPublish()
     {
-        EditorGUILayout.LabelField("Publish", EditorStyles.boldLabel);
+        EditorGUILayout.LabelField("Publish to staging", EditorStyles.boldLabel);
         if (!settings) return;
         if (exports.Count == 0) { EditorGUILayout.HelpBox($"No exports for {DlcContentPublisher.CurrentPlatform} {DlcContentPublisher.CurrentAppVersion} yet.", MessageType.None); }
         else
@@ -514,6 +533,50 @@ public sealed class DlcPublishWindow : EditorWindow
             if (GUILayout.Button("Status", GUILayout.Width(70))) Execute("status", (line, progress, cancel) => DlcContentPublisher.Status(settings));
         }
         DrawResume();
+    }
+
+    void DrawPromote()
+    {
+        EditorGUILayout.LabelField("Promote to production", EditorStyles.boldLabel);
+        if (!settings) return;
+        EditorGUILayout.HelpBox(
+            $"Copies what's published in {settings.container} for {DlcContentPublisher.CurrentPlatform} {DlcContentPublisher.CurrentAppVersion} " +
+            $"to {settings.productionContainer}, byte for byte: bundles, catalog and product manifests first, products.json last, so " +
+            "production players get exactly what you tested. Nothing is rebuilt or re-exported. With 'Only products of the checked " +
+            "releases' ticked, only those products are listed in production's products.json (bundles and the catalog are copied whole). " +
+            "If it stops, run it again: files already copied are skipped.", MessageType.None);
+        promoteAllowNewCatalog = EditorGUILayout.ToggleLeft(new GUIContent(
+            $"{DlcContentPublisher.CurrentAppVersion} hasn't shipped yet: allow a new catalog name in production",
+            "Like the publish option: only for an app version players don't have yet."), promoteAllowNewCatalog);
+        using (new EditorGUILayout.HorizontalScope())
+        {
+            if (GUILayout.Button("Promote dry run")) StartPromote(true);
+            if (GUILayout.Button("Promote to production…")) StartPromote(false);
+            if (GUILayout.Button("Production status", GUILayout.Width(120)))
+                Execute("production status", (line, progress, cancel) => DlcContentPublisher.Status(settings, production: true));
+        }
+    }
+
+    void StartPromote(bool dryRun)
+    {
+        List<string> products = null;
+        if (onlyCheckedProducts)
+        {
+            products = Checked().SelectMany(r => r.productIds ?? new List<string>()).Select(id => (id ?? "").Trim())
+                .Where(id => id.Length > 0).Distinct().ToList();
+            if (products.Count == 0) { report = "Check the releases to promote, or untick 'Only products of the checked releases' to promote every staged product."; return; }
+        }
+        string what = products == null ? "every product published to staging" : $"{products.Count} product(s): {string.Join(", ", products.Take(8))}{(products.Count > 8 ? ", …" : "")}";
+        bool allowNew = promoteAllowNewCatalog;
+        if (!dryRun && !EditorUtility.DisplayDialog("Promote DLC content to PRODUCTION",
+                $"Copy {what}\n\nfrom\n{DlcContentPublisher.Destination(settings)}\n\nto PRODUCTION\n{DlcContentPublisher.ProductionDestination(settings)}\n\n" +
+                "Players of this app version see it as soon as products.json is written. Did you test it with a staging build?" +
+                (allowNew ? "\n\nA new catalog name is ALLOWED in production. Only do this if the version hasn't shipped." : ""),
+                "Promote to production", "Cancel"))
+            return;
+        if (!dryRun) promoteAllowNewCatalog = false;
+        Execute(dryRun ? "promote dry run" : "promote",
+            (line, progress, cancel) => DlcContentPublisher.Promote(settings, products, dryRun, allowNew, line, progress, cancel));
     }
 
     void DrawResume()
@@ -612,7 +675,10 @@ public sealed class DlcPublishWindow : EditorWindow
         if (!showRollback || !settings) return;
         using (new EditorGUI.IndentLevelScope())
         {
-            EditorGUILayout.HelpBox("Rewrites products.json for this platform and app version only. Version folders are never deleted.", MessageType.None);
+            EditorGUILayout.HelpBox("Rewrites products.json for this platform and app version only. Version folders are never deleted. " +
+                "Staging and production are rolled back separately; a later promote copies staging's entries over production's.", MessageType.None);
+            rollbackProduction = EditorGUILayout.Popup("Container", rollbackProduction ? 1 : 0,
+                new[] { "Staging (" + settings.container + ")", "Production (" + settings.productionContainer + ")" }) == 1;
             rollbackProduct = EditorGUILayout.TextField("Product ID", rollbackProduct);
             rollbackMode = EditorGUILayout.Popup("Action", rollbackMode, new[] { "Make this version current", "Drop this version from the list" });
             rollbackVersion = EditorGUILayout.TextField("Version", rollbackVersion);
@@ -628,11 +694,12 @@ public sealed class DlcPublishWindow : EditorWindow
     void StartRollback(bool dryRun)
     {
         string product = rollbackProduct.Trim(), version = rollbackVersion.Trim();
-        bool drop = rollbackMode == 1;
+        bool drop = rollbackMode == 1, production = rollbackProduction;
+        string where = production ? "PRODUCTION " + DlcContentPublisher.ProductionDestination(settings) : DlcContentPublisher.Destination(settings);
         if (!dryRun && !EditorUtility.DisplayDialog("Rollback DLC product",
-                $"{(drop ? "Drop" : "Make current")} {version} of {product} in\n{DlcContentPublisher.Destination(settings)}products.json?", "Rollback", "Cancel"))
+                $"{(drop ? "Drop" : "Make current")} {version} of {product} in\n{where}products.json?", "Rollback", "Cancel"))
             return;
-        Execute("rollback", (line, progress, cancel) => DlcContentPublisher.Rollback(settings, product, version, drop, dryRun));
+        Execute("rollback", (line, progress, cancel) => DlcContentPublisher.Rollback(settings, product, version, drop, dryRun, production));
     }
 
     /// <param name="action">Gets callbacks for output lines and progress (from background threads) and a cancel token.</param>

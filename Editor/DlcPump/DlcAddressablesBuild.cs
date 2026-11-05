@@ -7,6 +7,7 @@ using Newtonsoft.Json.Linq;
 using UnityEditor;
 using UnityEditor.AddressableAssets;
 using UnityEditor.AddressableAssets.Build;
+using UnityEditor.AddressableAssets.Settings;
 using UnityEngine;
 
 /// <summary>
@@ -39,11 +40,70 @@ public static class DlcAddressablesBuild
         return null;
     }
 
-    /// <summary>One manifest for the build: the platform and profile, plus each checked release's snapshot.</summary>
-    public static JObject Snapshot(IList<DlcRelease> releases, string profile) => new JObject {
-        ["schemaVersion"] = 1, ["target"] = EditorUserBuildSettings.activeBuildTarget.ToString(),
-        ["appVersion"] = PlayerSettings.bundleVersion, ["profile"] = profile, ["unityVersion"] = Application.unityVersion,
-        ["releases"] = new JArray(releases.Where(r => r).OrderBy(r => r.releaseId, StringComparer.Ordinal).Select(r => (JToken)DlcReleaseService.Snapshot(r))) };
+    /// <summary>
+    /// A warning when the active profile's catalog load path is a fixed URL instead of the runtime content URL, else null.
+    /// Not an error: app versions that already shipped with a fixed URL must keep it for their content updates.
+    /// </summary>
+    public static string LoadPathWarning()
+    {
+        var settings = AddressableAssetSettingsDefaultObject.Settings;
+        if (!settings) return null;
+        string load = RemoteLoadPath(settings, settings.activeProfileId);
+        if (load == Arbelos.BuildUtility.Runtime.DlcEnvironment.RemoteLoadPath) return null;
+        return $"Remote.LoadPath of the active profile is '{load}', a fixed URL. A build made with it always loads from that one " +
+               "container: staging builds and production players read the same files, and promoted content still points at it. " +
+               $"Use the runtime content URL ({Arbelos.BuildUtility.Runtime.DlcEnvironment.RemoteLoadPath}) from the next app version on. " +
+               "Keep the fixed URL only for content updates of an app version that already shipped with it: installed players of that " +
+               "version can't read the runtime URL.";
+    }
+
+    /// <summary>The catalog's load path variable as written in the profile (unevaluated).</summary>
+    public static string RemoteLoadPath(AddressableAssetSettings settings, string profileId) =>
+        settings.profileSettings.GetValueById(profileId, settings.RemoteCatalogLoadPath.Id) ?? "";
+
+    /// <summary>Sets the active profile's catalog load path variable to the runtime content URL. Returns what it was.</summary>
+    public static string UseRuntimeLoadPath()
+    {
+        var settings = AddressableAssetSettingsDefaultObject.Settings;
+        string old = RemoteLoadPath(settings, settings.activeProfileId);
+        string name = settings.profileSettings.GetProfileDataById(settings.RemoteCatalogLoadPath.Id)?.ProfileName;
+        if (string.IsNullOrEmpty(name)) throw new InvalidOperationException("The remote catalog load path isn't a profile variable.");
+        Undo.RecordObject(settings, "Use runtime DLC content URL");
+        settings.profileSettings.SetValue(settings.activeProfileId, name, Arbelos.BuildUtility.Runtime.DlcEnvironment.RemoteLoadPath);
+        EditorUtility.SetDirty(settings);
+        AssetDatabase.SaveAssets();
+        return old;
+    }
+
+    /// <summary>
+    /// One manifest for the build: the platform and profile, plus each checked release's snapshot (every dependency's
+    /// SHA-256). Shows a cancelable progress bar; Cancel throws <see cref="OperationCanceledException"/>.
+    /// </summary>
+    public static JObject Snapshot(IList<DlcRelease> releases, string profile)
+    {
+        var ordered = releases.Where(r => r).OrderBy(r => r.releaseId, StringComparer.Ordinal).ToList();
+        var snapshots = new JArray();
+        try
+        {
+            for (int i = 0; i < ordered.Count; i++)
+            {
+                var release = ordered[i];
+                snapshots.Add(DlcReleaseService.Snapshot(release, (path, fraction) => EditorUtility.DisplayCancelableProgressBar(
+                    $"Fingerprinting release {i + 1} of {ordered.Count}: {release.releaseId}",
+                    path, (i + fraction) / Math.Max(1, ordered.Count))));
+            }
+        }
+        finally { EditorUtility.ClearProgressBar(); }
+        return new JObject {
+            ["schemaVersion"] = 1, ["target"] = EditorUserBuildSettings.activeBuildTarget.ToString(),
+            ["appVersion"] = PlayerSettings.bundleVersion, ["profile"] = profile, ["unityVersion"] = Application.unityVersion,
+            ["releases"] = snapshots };
+    }
+
+    /// <summary>Every ERROR from the releases' validation, prefixed with the release ID; empty when all are valid.</summary>
+    public static List<string> ValidationErrors(IEnumerable<DlcRelease> releases) =>
+        releases.Where(r => r).SelectMany(r => DlcReleaseService.Validate(r).Where(s => s.StartsWith("ERROR:"))
+            .Select(s => $"{r.releaseId}: {s.Substring(6).Trim()}")).ToList();
 
     /// <summary>
     /// Checks the editor state and queues the build for the next editor tick. Returns an error message, or null when
@@ -64,8 +124,17 @@ public static class DlcAddressablesBuild
         if (update && (string.IsNullOrWhiteSpace(baselinePath) || !File.Exists(baselinePath)))
             return "Choose the content-state baseline (the .bin from the full build players have). A content update never falls back to a full build.";
 
+        // Cheap checks first, for every release, before the slow fingerprinting.
+        var invalid = ValidationErrors(releases);
+        if (invalid.Count > 0)
+            return $"{invalid.Count} problem(s) in the checked releases; nothing was built. Fix them or uncheck those releases:\n  " +
+                   string.Join("\n  ", invalid.Take(30)) + (invalid.Count > 30 ? "\n  …" : "");
+
         AssetDatabase.SaveAssets();
-        var snapshot = Snapshot(releases, profile);
+        JObject snapshot;
+        try { snapshot = Snapshot(releases, profile); }
+        catch (OperationCanceledException) { return "Build cancelled while fingerprinting the releases. Nothing was built."; }
+        catch (Exception e) { return "Couldn't fingerprint the checked releases; nothing was built:\n" + e.Message; }
         Directory.CreateDirectory(ReceiptFolder);
         string receipt = Path.Combine(ReceiptFolder, (update ? "update-" : "full-") + DateTime.UtcNow.ToString("yyyyMMddTHHmmssfffZ"));
         DlcReleaseService.WriteNew(receipt + ".manifest.json", snapshot.ToString());

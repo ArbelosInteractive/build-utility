@@ -2,10 +2,36 @@
 
 This pipeline publishes one small JSON manifest per product, plus the Addressables remote catalog and bundles, to Azure Blob Storage. The game uses the manifests to find each owned product's Addressables keys. Ownership comes from the game's entitlement code; this pipeline doesn't decide who owns what.
 
+## Staging and production
+
+There are two containers in the same storage account, with the same layout:
+
+| | Staging (`dlc-staging`) | Production (`dlc-production`) |
+|---|---|---|
+| Publishing settings | `container` | `productionContainer` |
+| Game URL (`Resources/DlcRemoteConfig`) | `stagingCdnBaseUrl` | `cdnBaseUrl` |
+| Written by | **Publish** (and Rollback with *Staging*) | **Promote to production** only (and Rollback with *Production*) |
+| Read by | staging builds and the Editor's staging Play Mode | store builds |
+| Content-state baseline | stored here | not copied |
+
+The flow: build, export, **Publish** to staging, test with a staging build (or switch Play Mode to staging in **Build Utility > TSW Staging Build**), then **Promote to production** in DLC Publish. Promote copies the tested files byte for byte; nothing is rebuilt or re-exported. The PlayFab side works the same way: DLC Store Export uploads to the staging title first (see `Tools~/IAP UPLOADER/README.md`).
+
+One build has to work from both containers, so the URL is read at runtime. The Addressables Remote.LoadPath is `{Arbelos.BuildUtility.Runtime.DlcEnvironment.ContentUrl}/[BuildTarget]/[UnityEngine.Application.version]`: the part in braces is evaluated by Addressables when the game starts, from `DlcRemoteConfig`. It's `cdnBaseUrl` unless the game called `DlcEnvironment.UseStaging(true)` before Addressables initialized (staging builds and the staging Play Mode do). Staging never falls back to production: an empty `stagingCdnBaseUrl` loads no DLC.
+
+`promote` order, as for publish: every bundle in the staging version folder (create-only, identical skipped, a different file with the same name fails), the catalog and its `.hash`, each promoted product's `v<N>/product.json` (create-only), then production's `products.json` (If-Match). With *Only products of the checked releases* (`--product`), only those products' entries are written into production's `products.json`; the bundles and the catalog are always copied whole, and products left out stay invisible to production players. Stopping is safe at any point; run it again and the files already copied are skipped. The copy is server-side where the Azure SDK supports it and falls back to download + upload.
+
+```
+python Tools~/DlcPublisher/publish_dlc.py promote --account-url ... --container dlc-staging --to-container dlc-production --platform Android --app-version 1.4.0 --dry-run
+```
+
+The catalog name check applies to production too: promoting a full rebuild of a version production already has fails unless *allow a new catalog name in production* (`--allow-new-catalog`) is ticked. Roll staging and production back separately (Rollback has a *Container* choice); a later promote copies staging's entries over production's.
+
+**Builds made with a fixed URL.** An app version built with a fixed Remote.LoadPath (for example `https://…/dlc-staging/[BuildTarget]/…`) loads from that URL forever, whichever container its content is in, and old builds can't read the runtime URL. Keep the fixed URL for content updates of an app version that shipped with it, and use the runtime URL from the next app version on: DLC Publish warns while the active profile has a fixed URL and has a **Use runtime content URL** button. The export only warns.
+
 ## Storage layout
 
 ```
-dlc-content/                                   container (DlcPublishingSettings.container)
+dlc-staging/ (and dlc-production/)             container (DlcPublishingSettings.container / productionContainer)
   Android/                                     [BuildTarget] name
     1.4.0/                                     Application.version, one folder per app version
       catalog_<build>.bin + catalog_<build>.hash   the one remote catalog for this app version
@@ -44,10 +70,10 @@ Each app version has its own catalog, so a build points at its own folder only. 
 
 | Profile variable | Value |
 |---|---|
-| Remote.LoadPath | `<cdnBaseUrl>/[BuildTarget]/[UnityEngine.Application.version]` |
+| Remote.LoadPath | `{Arbelos.BuildUtility.Runtime.DlcEnvironment.ContentUrl}/[BuildTarget]/[UnityEngine.Application.version]` |
 | Remote.BuildPath | `ServerData/[BuildTarget]/[UnityEngine.Application.version]` |
 
-Keep **Build Remote Catalog** on and group **Bundle Naming** set to *Append Hash*, so unchanged bundles keep their file names. The exporter refuses to run unless the selected profile's paths end in `/<Platform>/<appVersion>` and Remote.LoadPath equals `cdnBaseUrl` + that suffix.
+Keep **Build Remote Catalog** on and group **Bundle Naming** set to *Append Hash*, so unchanged bundles keep their file names. The exporter refuses to run unless the selected profile's paths end in `/<Platform>/<appVersion>`, and checks that `Resources/DlcRemoteConfig` has both URLs (different ones, ending in the two container names). A fixed Remote.LoadPath is only a warning (see *Staging and production*).
 
 A content update for an app version that has already shipped uses Addressables' *Update a Previous Build* with that version's content-state file. The catalog name stays the same, and new or changed bundles get new hash names. A new app version uses a full build and starts with an empty folder and an empty `products.json`.
 
@@ -71,9 +97,9 @@ Clients that have already shipped keep the load path baked into their catalog, s
 ## One-time Azure setup
 
 1. **Storage account** (StorageV2). Under *Data protection*, turn on **Blob versioning** and **soft delete for blobs and containers** (for example, 30 days). Mistaken overwrites or deletes can then be recovered in the portal. The tools never configure this themselves.
-2. **Container** `dlc-content`. With the default *PublicRead* access mode, set its public access level to **Blob** (anonymous read of blobs, no listing), and enable *Allow Blob anonymous access* on the account.
+2. **Containers** `dlc-staging` and `dlc-production`. With the default *PublicRead* access mode, set the public access level of both to **Blob** (anonymous read of blobs, no listing), and enable *Allow Blob anonymous access* on the account.
 3. **RBAC.** Give each person who publishes **Storage Blob Data Contributor** on the account or the container. Publishing signs in with `az login` (AzureCliCredential). No account keys or SAS tokens are stored anywhere.
-4. **CDN** (Azure Front Door or CDN). Create an origin for the storage account with the origin path `/dlc-content`, or route `/dlc-content/*` to it. Put that public URL into `DlcPublishingSettings.cdnBaseUrl` and `DlcRemoteConfig.cdnBaseUrl`. Have the CDN honour origin cache headers. The publisher sets `Cache-Control: public, max-age=60` on `products.json` and the catalog, and `public, max-age=31536000, immutable` on bundles and `product.json`.
+4. **CDN** (Azure Front Door or CDN). Route `/dlc-staging/*` and `/dlc-production/*` to the storage account (one origin without an origin path serves both). Put the public URLs into `Resources/DlcRemoteConfig`: `stagingCdnBaseUrl` (…/dlc-staging) and `cdnBaseUrl` (…/dlc-production). Have the CDN honour origin cache headers. The publisher sets `Cache-Control: public, max-age=60` on `products.json` and the catalog, and `public, max-age=31536000, immutable` on bundles and `product.json`.
 5. **Python** 3.8 or newer: `pip install azure-identity azure-storage-blob`, plus the Azure CLI (`winget install Microsoft.AzureCLI`).
 6. **Sign in** with **Sign in to Azure** in the DLC Publish window, which runs `az login` in your browser; for a guest account, set `azureTenant` in the publishing settings first. The status line then shows who is signed in and whether that account can read the container. **Check again** re-tests it and **Sign out** runs `az logout`. On a build server, run `az login --service-principal ...` before publishing instead.
 
@@ -91,7 +117,7 @@ Clients that have already shipped keep the load path baked into their catalog, s
    - the profile paths break the app-version rule
 
    The export goes to `<stagingDirectory>/<Platform>/<appVersion>/<utc>/` and contains `export.json`, `validation.json` and one draft `product.json` per product. A product's version number is assigned when it's published.
-4. In the same window, choose the export, then click **Publish dry run** and then **Publish…**. *Only products of the checked releases* passes `--product` for just those products. **Status** prints the live `products.json`, and the **Rollback** section runs the rollback commands below. On the command line:
+4. In the same window, choose the export, then click **Publish dry run** and then **Publish…**. This publishes to the **staging** container; test it, then use **Promote to production** (see *Staging and production*). *Only products of the checked releases* passes `--product` for just those products. **Status** prints the live `products.json`, and the **Rollback** section runs the rollback commands below. On the command line:
 
 ```
 python Tools~/DlcPublisher/publish_dlc.py publish --staging <export dir> --account-url https://<account>.blob.core.windows.net --dry-run
@@ -139,7 +165,7 @@ After a rollback, keys from the newer version that also need older bundles still
 ## In the game
 
 ```csharp
-var service = new DlcContentService(remoteConfig);          // DlcRemoteConfig asset with cdnBaseUrl
+var service = new DlcContentService(remoteConfig);          // DlcRemoteConfig: cdnBaseUrl, or stagingCdnBaseUrl after DlcEnvironment.UseStaging(true)
 await service.LoadAllAsync();                                // every launch and on resume, after Addressables is initialized
 if (service.TryGetKeys("wrestler_jazz", out var keys)) { /* the game's own ownership check decides whether to use them */ }
 ```

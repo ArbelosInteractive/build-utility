@@ -16,6 +16,14 @@ Commands:
     status    print products.json for a platform and app version
     check     sign in and confirm the container can be read (writes nothing)
     baseline  download the stored content-state file for a platform and app version
+    promote   copy what's published in one container (staging) to another (production), unchanged
+
+Staging and production: publish to the staging container ("dlc-staging"), test with a staging build, then
+promote to the production container ("dlc-production"). Promote copies the version's bundles, catalog and
+product manifests byte for byte (server-side, in the publish order) and then writes the production
+products.json, so production gets exactly the files that were tested. The Addressables Remote.LoadPath has to be
+read at runtime ({Arbelos.BuildUtility.Runtime.DlcEnvironment.ContentUrl}/...) for the same catalog to work from
+both containers. The content-state baseline stays in the staging container, where builds read it.
 
 Publish order (always): bundles -> catalog, then its .hash -> v<N>/product.json -> products.json.
   * A bundle that already exists with the same MD5 is skipped; a different MD5 under the same name fails.
@@ -46,6 +54,8 @@ Usage:   python publish_dlc.py publish --staging <export dir> --account-url http
          python publish_dlc.py publish --staging <export dir> --account-url ... --product wrestler_jazz
          python publish_dlc.py rollback --account-url ... --platform Android --app-version 1.4.0 --product wrestler_jazz --to v1
          python publish_dlc.py rollback ... --product wrestler_jazz --drop v2
+         python publish_dlc.py promote --account-url ... --container dlc-staging --to-container dlc-production \
+                --platform Android --app-version 1.4.0 [--product wrestler_jazz] --dry-run
 """
 import argparse
 import datetime
@@ -115,7 +125,8 @@ class AzureStore:
             from azure.storage.blob import BlobServiceClient
         except ImportError:
             raise PublishError("Missing packages. Run: pip install azure-identity azure-storage-blob")
-        service = BlobServiceClient(account_url, credential=AzureCliCredential())
+        self.credential = AzureCliCredential()
+        service = BlobServiceClient(account_url, credential=self.credential)
         self.container = service.get_container_client(container)
         try:
             if not self.container.exists():
@@ -169,6 +180,30 @@ class AzureStore:
         finally:
             if not isinstance(data, bytes):
                 body.close()
+
+    def copy_from(self, source, name, create_only=False):
+        """Copies blob `name` from another AzureStore, keeping its properties (Content-MD5, type, cache control).
+        Server-side when the SDK supports it; otherwise streamed through this machine."""
+        import tempfile
+        from azure.core.exceptions import ResourceExistsError, ResourceModifiedError
+        src = source.container.get_blob_client(name)
+        dst = self.container.get_blob_client(name)
+        try:
+            try:
+                token = source.credential.get_token("https://storage.azure.com/.default").token
+                dst.upload_blob_from_url(src.url, overwrite=not create_only, source_authorization="Bearer " + token)
+                return
+            except (ResourceExistsError, ResourceModifiedError):
+                raise
+            except Exception:
+                pass  # old SDK, or the copy isn't allowed: fall back to download + upload
+            props = src.get_blob_properties()
+            with tempfile.TemporaryFile() as f:
+                src.download_blob().readinto(f)
+                f.seek(0)
+                dst.upload_blob(f, overwrite=not create_only, content_settings=props.content_settings)
+        except (ResourceExistsError, ResourceModifiedError) as e:
+            raise Conflict(str(e).splitlines()[0])
 
 
 # --------------------------------------------------------------------------------------- run log
@@ -559,6 +594,128 @@ def publish(store, run, staging, only, allow_new_catalog=False):
     run.progress(4, "products.json", 1, 1, "files", prefix + "products.json", 1, 1, force=True)
 
 
+# --------------------------------------------------------------------------------------- promote
+
+def copy_blob(src, dst, run, name, create_only):
+    """Copies one blob between containers. Identical (same Content-MD5) is skipped; for create-only blobs a
+    different one already in the destination fails."""
+    source_md5 = with_retries(run, "checking " + name, lambda: src.md5(name))
+    if source_md5 is None:
+        raise PublishError(f"{name} is listed in the source but doesn't exist there.")
+    remote = with_retries(run, "checking " + name, lambda: dst.md5(name))
+    if remote is not None:
+        if source_md5 and remote == source_md5:
+            run.skip(name + " (identical)")
+            return
+        if create_only:
+            raise PublishError(f"{name} already exists in the destination with different content. Files there are "
+                               "never overwritten; was something published straight to it?")
+    if run.dry_run:
+        run.did(name)
+        return
+    try:
+        with_retries(run, "copying " + name, lambda: dst.copy_from(src, name, create_only=create_only))
+    except Conflict:
+        if create_only and dst.md5(name) == source_md5:
+            run.skip(name + " (identical, landed on an earlier attempt)")
+            return
+        raise PublishError(f"{name} was created by someone else during this run.")
+    run.did(name)
+
+
+def copy_blobs(src, dst, run, step, phase, names, create_only, keep_going):
+    failures = []
+    run.progress(step, phase, 0, len(names), "files", "", 0, len(names), force=True)
+    for i, name in enumerate(names):
+        try:
+            copy_blob(src, dst, run, name, create_only)
+        except PublishError as e:
+            if not keep_going:
+                raise
+            failures.append(str(e))
+            run.say("FAILED   " + str(e))
+        run.progress(step, phase, i + 1, len(names), "files", name, i + 1, len(names), force=i + 1 == len(names))
+    if failures:
+        raise PublishError(f"{len(failures)} of {len(names)} file(s) in '{phase}' failed; nothing after them was "
+                           "written. Run the same promote again to copy only what's missing.\n  "
+                           + "\n  ".join(failures[:20]) + ("\n  ..." if len(failures) > 20 else ""))
+
+
+def source_catalog(src, prefix, index):
+    """The catalog products.json was published with: the one whose .hash holds index['catalogBuild']."""
+    names = remote_catalogs(src, prefix)
+    if not names:
+        raise PublishError(f"The source has no catalog in {prefix}.")
+    for name in names:
+        hash_name = prefix + name.rsplit(".", 1)[0] + ".hash"
+        found = src.read(hash_name)
+        if found is not None and found[0].decode("utf-8", "replace").strip() == index.get("catalogBuild"):
+            return name, hash_name[len(prefix):]
+    if len(names) == 1:
+        return names[0], names[0].rsplit(".", 1)[0] + ".hash"
+    raise PublishError(f"The source has several catalogs in {prefix} ({', '.join(names)}) and none matches its "
+                       f"products.json (catalogBuild {index.get('catalogBuild')}).")
+
+
+def promote(src, dst, run, platform, app_version, only=None, allow_new_catalog=False):
+    prefix = f"{safe_segment(platform, 'Platform')}/{safe_segment(app_version, 'App version')}/"
+    index, etag = load_index(src, prefix, platform, app_version)
+    if etag is None:
+        raise PublishError(f"The source has no {prefix}products.json. Publish to it first.")
+    entries = index["products"]
+    if only:
+        unknown = sorted(set(only) - {e["productId"] for e in entries})
+        if unknown:
+            raise PublishError(f"Not published in the source: {', '.join(unknown)}.")
+        entries = [e for e in entries if e["productId"] in only]
+    if not entries:
+        raise PublishError(f"{prefix}products.json in the source lists no products.")
+
+    catalog, hash_file = source_catalog(src, prefix, index)
+    check_catalog_name(dst, run, prefix, catalog, allow_new_catalog)
+    target, target_etag = load_index(dst, prefix, platform, app_version)
+    manifests = []
+    for e in entries:
+        for v in e.get("versions", []):
+            if not VERSION_FOLDER.match(v):
+                raise PublishError(f"{e['productId']} lists '{v}', which isn't a version folder.")
+            manifests.append(f"{prefix}{e['productId']}/{v}/product.json")
+        live = find_entry(target, e["productId"])
+        run.say(f"  {e['productId']}: {e.get('current')}"
+                + (f" (production has {live.get('current')})" if live else " (new in production)"))
+
+    def is_content(name):
+        rel = name[len(prefix):]
+        if rel == "products.json" or ("/" not in rel and CATALOG_FILE.match(rel)):
+            return False
+        parts = rel.split("/")
+        return not (len(parts) == 3 and VERSION_FOLDER.match(parts[1]) and parts[2] == "product.json")
+
+    bundles = [n for n in src.list(prefix) if is_content(n)]
+    run.say(f"Promoting {prefix}: {len(bundles)} bundle file(s), catalog {catalog}, {len(manifests)} manifest(s), "
+            f"{len(entries)} product(s)")
+
+    run.say("\n1. Bundles")
+    copy_blobs(src, dst, run, 1, "Bundles", bundles, create_only=True, keep_going=True)
+    run.say("\n2. Catalog")
+    copy_blobs(src, dst, run, 2, "Catalog", [prefix + catalog, prefix + hash_file], create_only=False, keep_going=False)
+    run.say("\n3. Product manifests")
+    copy_blobs(src, dst, run, 3, "Product manifests", manifests, create_only=True, keep_going=False)
+
+    run.say("\n4. products.json")
+    run.progress(4, "products.json", 0, 1, "files", prefix + "products.json", 0, 1, force=True)
+    for e in entries:
+        live = find_entry(target, e["productId"])
+        copy = {"productId": e["productId"], "current": e.get("current"), "versions": list(e.get("versions", []))}
+        if live is None:
+            target["products"].append(copy)
+        else:
+            live.update(copy)
+    target["catalogBuild"] = index.get("catalogBuild", "")
+    save_index(dst, run, prefix, target, target_etag)
+    run.progress(4, "products.json", 1, 1, "files", prefix + "products.json", 1, 1, force=True)
+
+
 # --------------------------------------------------------------------------------------- rollback / status
 
 def rollback(store, run, platform, app_version, product_id, to=None, drop=None):
@@ -634,6 +791,9 @@ def status(store, run, platform, app_version, state_json=False):
 # --------------------------------------------------------------------------------------- main
 
 def resume_hint(run, args):
+    if args.command == "promote" and not args.dry_run and run.created:
+        run.say("\nTo continue: run the same promote again. Files already copied are skipped; products.json is "
+                "only written at the very end.")
     if args.command == "publish" and not args.dry_run and run.created:
         run.say("\nTo continue: run the same publish again. Files already uploaded are skipped and manifests written "
                 "by this run are reused; products.json is only written at the very end.")
@@ -668,6 +828,17 @@ def main(argv=None, store_factory=AzureStore):
     g.add_argument("--to", metavar="vN", help="make this version current")
     g.add_argument("--drop", metavar="vN", help="remove this version from the list; its folder stays")
 
+    p = sub.add_parser("promote", help="copy a published version from this container to another (staging -> production)")
+    common(p)
+    p.add_argument("--to-container", required=True, help="destination container, e.g. dlc-production")
+    p.add_argument("--platform", required=True)
+    p.add_argument("--app-version", required=True)
+    p.add_argument("--product", nargs="+", metavar="ID",
+                   help="only list these products in the destination products.json (bundles and the catalog are "
+                        "always copied whole)")
+    p.add_argument("--allow-new-catalog", action="store_true",
+                   help="promote even if the destination already has a catalog with a different name")
+
     p = sub.add_parser("check", help="confirm the signed-in user can reach the container")
     common(p)
 
@@ -691,7 +862,15 @@ def main(argv=None, store_factory=AzureStore):
         if not re.match(r"^[a-z0-9](?!.*--)[a-z0-9-]{1,61}[a-z0-9]$", args.container):
             raise PublishError(f"Invalid container name '{args.container}'.")
         store = store_factory(args.account_url, args.container)
-        if args.command == "publish":
+        if args.command == "promote":
+            if not re.match(r"^[a-z0-9](?!.*--)[a-z0-9-]{1,61}[a-z0-9]$", args.to_container):
+                raise PublishError(f"Invalid container name '{args.to_container}'.")
+            if args.to_container == args.container:
+                raise PublishError("--to-container is the same as --container.")
+            run.say(f"  -> {args.account_url}/{args.to_container}")
+            promote(store, store_factory(args.account_url, args.to_container), run, args.platform, args.app_version,
+                    args.product, args.allow_new_catalog)
+        elif args.command == "publish":
             publish(store, run, args.staging, args.product, args.allow_new_catalog)
         elif args.command == "check":
             run.say(f"OK: signed in and can read {args.account_url}/{args.container}.")

@@ -35,6 +35,9 @@ public sealed class DlcStoreExportWindow : EditorWindow
     string itemsError, itemsFor;
     bool loadingItems, uploading, azureBusy, azureOk;
     string azureStatus = "Azure: not checked yet";
+    // Not serialized: the PlayFab target goes back to staging whenever the window reloads.
+    [NonSerialized] bool playFabProduction, skipStagingCheck;
+    string stagingTitle = "", productionTitle = "";
     System.Threading.CancellationTokenSource cancelSource;
     readonly object live = new object();
     readonly Queue<string> liveTail = new Queue<string>();
@@ -378,7 +381,9 @@ public sealed class DlcStoreExportWindow : EditorWindow
         activateGoogle = EditorGUILayout.ToggleLeft(new GUIContent("Google Play: make purchase options active (--activate)",
             "Off: purchase options are left inactive and can be activated in Play Console."), activateGoogle);
         publishPlayFab = EditorGUILayout.ToggleLeft(new GUIContent("PlayFab: publish the items (--publish)",
-            "Off: items are created or updated as drafts, to review in the DLC PlayFab Review window or Game Manager."), publishPlayFab);
+            "Off: items are created or updated as drafts, to review in the DLC PlayFab Review window or Game Manager. " +
+            "The game only sees published items, so publish on staging to test them in a staging build."), publishPlayFab);
+        DrawPlayFabTarget();
 
         for (int i = 0; i < DlcStoreUploader.Platforms.Length; i++) DrawPlatform(i);
 
@@ -392,6 +397,37 @@ public sealed class DlcStoreExportWindow : EditorWindow
             if (GUILayout.Button($"Upload all checked ({checkedTotal})…")) StartUpload(all, false);
         }
         EditorGUILayout.LabelField("Stores run in the order Apple, Google Play, PlayFab; the first failure stops the run. Existing items are updated.", EditorStyles.miniLabel);
+    }
+
+    void DrawPlayFabTarget()
+    {
+        using (new EditorGUILayout.HorizontalScope())
+        {
+            string Title(string id) => string.IsNullOrEmpty(id) ? "" : " " + id;
+            int picked = EditorGUILayout.Popup(new GUIContent("PlayFab title",
+                    "Staging: the test title (Key Vault secrets playfab-staging-title-id / playfab-staging-secret-key). Test there with a " +
+                    "staging build or the staging Play Mode, then upload the same export to production."),
+                playFabProduction ? 1 : 0, new[] { "Staging" + Title(stagingTitle), "PRODUCTION" + Title(productionTitle) });
+            if (picked == 1 && !playFabProduction &&
+                !EditorUtility.DisplayDialog("PlayFab production title",
+                    "Upload PlayFab items to the PRODUCTION title? Only items uploaded to staging first, with the same file, are accepted.",
+                    "Use production", "Stay on staging"))
+                picked = 0;
+            playFabProduction = picked == 1;
+            if (!playFabProduction) skipStagingCheck = false;
+        }
+        if (playFabProduction)
+        {
+            int untested = Items("playfab").Count(i => i.selected && i.problem == null && i.staged != "same");
+            EditorGUILayout.HelpBox(untested == 0
+                    ? "PRODUCTION: real players see published items. Every checked PlayFab item matches its staging upload."
+                    : $"PRODUCTION: {untested} checked PlayFab item(s) weren't uploaded to staging as they are now (see the list), so the upload stops before sending anything. Upload them to staging and test them first.",
+                untested == 0 ? MessageType.Warning : MessageType.Error);
+            skipStagingCheck = EditorGUILayout.ToggleLeft(new GUIContent("Skip the staging check (--skip-staging-check)",
+                "Upload to production even if items weren't uploaded to staging first. Only for items tested another way."), skipStagingCheck);
+        }
+        else if (!string.IsNullOrEmpty(productionTitle) && string.IsNullOrEmpty(stagingTitle) && azureOk)
+            EditorGUILayout.HelpBox("The Key Vault has no playfab-staging-title-id / playfab-staging-secret-key yet. Add them (the staging title ID and its secret key) to upload to staging.", MessageType.Warning);
     }
 
     void DrawAzure()
@@ -439,8 +475,10 @@ public sealed class DlcStoreExportWindow : EditorWindow
             {
                 azureStatus = $"Azure: signed in as {user}   |   checking the Key Vault…";
                 Repaint();
-                var (ok, message) = await DlcStoreUploader.CheckVault(settings.pythonExecutable, settings.keyVaultName);
+                var (ok, message, staging, production) = await DlcStoreUploader.CheckVault(settings.pythonExecutable, settings.keyVaultName);
                 azureOk = ok;
+                stagingTitle = staging;
+                productionTitle = production;
                 azureStatus = $"Azure: signed in as {user}   |   {message}";
             }
         }
@@ -521,9 +559,20 @@ public sealed class DlcStoreExportWindow : EditorWindow
                         EditorGUILayout.LabelField(new GUIContent(item.problem, item.problem), red, GUILayout.MinWidth(120));
                     }
                     else EditorGUILayout.LabelField(new GUIContent(item.details, item.details), EditorStyles.miniLabel, GUILayout.MinWidth(120));
+                    if (platform == "playfab") StagedLabel(item.staged);
                     StatusLabel(item.status, 95);
                 }
         }
+    }
+
+    void StagedLabel(string staged)
+    {
+        string text = staged == "same" ? "on staging" : staged == "changed" ? "changed since staging" : "not on staging";
+        var style = new GUIStyle(EditorStyles.miniLabel) { alignment = TextAnchor.MiddleRight };
+        if (staged == "same") style.normal.textColor = new Color(0.15f, 0.6f, 0.3f);
+        else if (playFabProduction) style.normal.textColor = new Color(0.85f, 0.45f, 0.1f);
+        EditorGUILayout.LabelField(new GUIContent(text, "Whether this exact file was uploaded to the PlayFab staging title (playfab-staging-receipt.json in the export)."),
+            style, GUILayout.Width(120));
     }
 
     static void StatusLabel(string status, float width)
@@ -555,7 +604,9 @@ public sealed class DlcStoreExportWindow : EditorWindow
             if (!EditorUtility.DisplayDialog("Upload to the stores",
                     $"Upload from\n{Path.GetFileName(uploadExport)}\n\n{summary}\n\n" +
                     (selection.ContainsKey("google") ? $"Google purchase options: {(activateGoogle ? "ACTIVE" : "left inactive")}\n" : "") +
-                    (selection.ContainsKey("playfab") ? $"PlayFab items: {(publishPlayFab ? "PUBLISHED" : "drafts")}\n" : "") +
+                    (selection.ContainsKey("playfab") ? $"PlayFab items: {(publishPlayFab ? "PUBLISHED" : "drafts")} on the " +
+                        (playFabProduction ? $"PRODUCTION title {productionTitle}" : $"staging title {stagingTitle}") +
+                        (playFabProduction && skipStagingCheck ? " (staging check SKIPPED)" : "") + "\n" : "") +
                     "\nExisting items are updated. The first failure stops the run.", "Upload", "Cancel"))
                 return;
         }
@@ -583,7 +634,7 @@ public sealed class DlcStoreExportWindow : EditorWindow
                 l => { lock (live) { liveTail.Enqueue(l); while (liveTail.Count > 200) liveTail.Dequeue(); liveDirty = true; } },
                 (p, state) => { lock (live) { livePlatforms.Add((p, state)); liveDirty = true; } },
                 (p, name, status) => { lock (live) { liveItems.Add((p, name, status)); liveDirty = true; } },
-                cancelSource.Token);
+                cancelSource.Token, playFabProduction, skipStagingCheck);
             Update(); // apply the last statuses
             uploading = false;
             foreach (string p in selection.Keys)
@@ -594,6 +645,7 @@ public sealed class DlcStoreExportWindow : EditorWindow
             }
             report = (code == 0 ? "" : $"{label.ToUpperInvariant()} FAILED (exit {code})\n") + output;
             if (code == 0) Debug.Log("[IAP Upload]\n" + output); else Debug.LogError("[IAP Upload]\n" + output);
+            if (!dryRun && !playFabProduction && selection.ContainsKey("playfab")) RefreshStaged();
         }
         catch (Exception e) { report = $"{label} failed: {e}"; Debug.LogException(e); }
         finally
@@ -603,6 +655,17 @@ public sealed class DlcStoreExportWindow : EditorWindow
             cancelSource = null;
             if (this) { reportScroll = Vector2.zero; Repaint(); }
         }
+    }
+
+    /// <summary>Re-reads which PlayFab items are on staging (after a staging upload), keeping checkboxes and statuses.</summary>
+    async void RefreshStaged()
+    {
+        string export = uploadExport;
+        var (loaded, error) = await DlcStoreUploader.List(settings.pythonExecutable, export);
+        if (error != null || loaded == null || export != uploadExport || !loaded.TryGetValue("playfab", out var fresh)) return;
+        foreach (var item in Items("playfab"))
+            item.staged = fresh.FirstOrDefault(f => f.arg == item.arg)?.staged ?? item.staged;
+        if (this) Repaint();
     }
 
     async void InstallPackages()

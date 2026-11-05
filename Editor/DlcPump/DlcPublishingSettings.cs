@@ -12,12 +12,13 @@ public sealed class DlcPublishingSettings : ScriptableObject
     [FormerlySerializedAs("azureAccount")]
     public string accountName = "";
 
-    [Tooltip("Blob container holding <Platform>/<appVersion>/... Lowercase letters, digits and hyphens.")]
-    public string container = "dlc-content";
+    [Tooltip("STAGING blob container: Publish, Status, Rollback and the content-state baseline use it. Staging builds read it " +
+             "(DlcRemoteConfig.stagingCdnBaseUrl). Lowercase letters, digits and hyphens.")]
+    public string container = "dlc-staging";
 
-    [Tooltip("Public URL of the container root, normally the CDN, e.g. https://example.azurefd.net/dlc-content. " +
-             "The Addressables Remote.LoadPath must be this + /[BuildTarget]/[UnityEngine.Application.version].")]
-    public string cdnBaseUrl = "";
+    [Tooltip("PRODUCTION blob container in the same storage account. Only Promote to production writes to it; store builds " +
+             "read it (DlcRemoteConfig.cdnBaseUrl).")]
+    public string productionContainer = "dlc-production";
 
     [Tooltip("PublicRead: manifests, catalog and bundles are anonymously readable. SignedUrl is reserved for paid bundles; see IDlcUrlSigner.")]
     public DlcContentAccessMode accessMode = DlcContentAccessMode.PublicRead;

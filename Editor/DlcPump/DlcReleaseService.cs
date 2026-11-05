@@ -24,11 +24,24 @@ public static class DlcReleaseService
             return BitConverter.ToString(sha.ComputeHash(bytes)).Replace("-", "").ToLowerInvariant();
     }
 
+    // SHA-256 per file, reused while the file's size and modified time stay the same (until the next domain reload).
+    // Snapshots hash every dependency of every content asset; without this, each build hashed gigabytes twice.
+    static readonly Dictionary<string, (long length, long ticks, string hash)> hashCache =
+        new Dictionary<string, (long, long, string)>(StringComparer.OrdinalIgnoreCase);
+
     public static string HashFile(string path)
     {
+        var info = new FileInfo(path);
+        string key = info.FullName;
+        long length = info.Length, ticks = info.LastWriteTimeUtc.Ticks;
+        lock (hashCache)
+            if (hashCache.TryGetValue(key, out var cached) && cached.length == length && cached.ticks == ticks) return cached.hash;
+        string hash;
         using (var stream = File.OpenRead(path))
         using (var sha = SHA256.Create())
-            return BitConverter.ToString(sha.ComputeHash(stream)).Replace("-", "").ToLowerInvariant();
+            hash = BitConverter.ToString(sha.ComputeHash(stream)).Replace("-", "").ToLowerInvariant();
+        lock (hashCache) hashCache[key] = (length, ticks, hash);
+        return hash;
     }
 
     public static List<string> Validate(DlcRelease release)
@@ -95,16 +108,21 @@ public static class DlcReleaseService
         return issues;
     }
 
-    public static JObject Snapshot(DlcRelease release)
+    /// <param name="progress">Optional: called with (asset path, 0..1) before each content entry; return true to cancel
+    /// (throws <see cref="OperationCanceledException"/>).</param>
+    public static JObject Snapshot(DlcRelease release, Func<string, float, bool> progress = null)
     {
         var errors = Validate(release).Where(s => s.StartsWith("ERROR:")).ToArray();
         if (errors.Length > 0) throw new InvalidOperationException(string.Join("\n", errors));
         var products = (JArray)Catalog()["products"];
         var content = new JArray();
         var dependencyCache = new Dictionary<string, JObject>(StringComparer.Ordinal);
-        foreach (var item in release.content.OrderBy(c => c.productId).ThenBy(c => AssetDatabase.GetAssetPath(c.asset)))
+        var entries = release.content.OrderBy(c => c.productId).ThenBy(c => AssetDatabase.GetAssetPath(c.asset)).ToList();
+        for (int index = 0; index < entries.Count; index++)
         {
+            var item = entries[index];
             var path = AssetDatabase.GetAssetPath(item.asset);
+            if (progress != null && progress(path, entries.Count == 0 ? 1f : (float)index / entries.Count)) throw new OperationCanceledException();
             var dependencies = new JArray();
             foreach (var dep in AssetDatabase.GetDependencies(path, true).OrderBy(p => p))
             {

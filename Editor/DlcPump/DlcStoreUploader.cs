@@ -26,6 +26,8 @@ public static class DlcStoreUploader
     public sealed class Item
     {
         public string key, arg, id, name, details, problem;
+        /// <summary>PlayFab only: "same" (uploaded to the staging title as it is now), "changed" or "no".</summary>
+        public string staged;
         public bool selected = true;
         public string status = "";
 
@@ -65,10 +67,11 @@ public static class DlcStoreUploader
         catch (Exception e) { return (null, "Couldn't read the item list: " + e.Message); }
     }
 
-    public static async Task<(bool ok, string message)> CheckVault(string python, string vault)
+    /// <summary>Vault access, plus the staging and production PlayFab title IDs it holds ("" when a secret is missing).</summary>
+    public static async Task<(bool ok, string message, string stagingTitle, string productionTitle)> CheckVault(string python, string vault)
     {
         bool ok = false;
-        string message = null;
+        string message = null, stagingTitle = "", productionTitle = "";
         var (code, output) = await DlcPythonProcess.Run(python, new[] { Script, "--vault", vault ?? "", "--check-vault" },
             onMachine: (kind, data) =>
             {
@@ -76,16 +79,22 @@ public static class DlcStoreUploader
                 var o = JObject.Parse(data);
                 ok = (bool?)o["ok"] ?? false;
                 message = (string)o["message"];
+                stagingTitle = (string)o["stagingTitleId"] ?? "";
+                productionTitle = (string)o["productionTitleId"] ?? "";
             }, idleTimeout: TimeSpan.FromMinutes(2));
-        return (ok, message ?? (output.Trim().Length > 0 ? output.Trim().Split('\n').Last() : $"check failed (exit {code})"));
+        return (ok, message ?? (output.Trim().Length > 0 ? output.Trim().Split('\n').Last() : $"check failed (exit {code})"),
+            stagingTitle, productionTitle);
     }
 
     /// <param name="items">Per platform: null uploads every item of that platform, otherwise just these args.</param>
     /// <param name="onPlatform">(platform, state) as each store starts and ends; background thread.</param>
     /// <param name="onItem">(platform, printed name, status) as items finish; background thread.</param>
+    /// <param name="playFabProduction">Upload PlayFab items to the production title; otherwise to the staging title.
+    /// Production only accepts items whose exact file went to staging first, unless <paramref name="skipStagingCheck"/>.</param>
     public static Task<(int code, string output)> Upload(string python, string export, string vault,
         IDictionary<string, List<string>> items, bool dryRun, bool activateGoogle, bool publishPlayFab,
-        Action<string> onLine, Action<string, string> onPlatform, Action<string, string, string> onItem, CancellationToken cancel)
+        Action<string> onLine, Action<string, string> onPlatform, Action<string, string, string> onItem, CancellationToken cancel,
+        bool playFabProduction = false, bool skipStagingCheck = false)
     {
         var platforms = Platforms.Where(items.ContainsKey).ToList();
         var args = new List<string> { Script, "--export", export, "--vault", vault ?? "", "--log-dir", LogDir, "--progress", "--only" };
@@ -95,6 +104,11 @@ public static class DlcStoreUploader
         if (dryRun) args.Add("--dry-run");
         if (activateGoogle && platforms.Contains("google")) args.Add("--activate");
         if (publishPlayFab && platforms.Contains("playfab")) args.Add("--publish");
+        if (platforms.Contains("playfab"))
+        {
+            args.AddRange(new[] { "--playfab-target", playFabProduction ? "production" : "staging" });
+            if (playFabProduction && skipStagingCheck) args.Add("--skip-staging-check");
+        }
 
         return DlcPythonProcess.Run(python, args, onLine, (kind, json) =>
         {

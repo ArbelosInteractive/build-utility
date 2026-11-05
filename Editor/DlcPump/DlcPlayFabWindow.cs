@@ -44,7 +44,7 @@ public sealed class DlcPlayFabWindow : EditorWindow
         if (connection)
         {
             var serialized = new SerializedObject(connection);
-            foreach (string name in new[] { "environmentName", "titleId", "secretEnvironmentVariable", "ownershipSafeClientDeployed" }) controls.Add(new PropertyField(serialized.FindProperty(name)));
+            foreach (string name in new[] { "environmentName", "titleId", "keyVaultName", "keyVaultSecretName", "secretEnvironmentVariable", "ownershipSafeClientDeployed" }) controls.Add(new PropertyField(serialized.FindProperty(name)));
             controls.Bind(serialized);
         }
         Field("Schedule (optional)", typeof(DlcWaveSchedule), schedule, o => schedule = o as DlcWaveSchedule);
@@ -54,7 +54,8 @@ public sealed class DlcPlayFabWindow : EditorWindow
         actions.Add(DlcArtistWindow.Button("Publish reviewed changes…", () => Run(Publish)));
         root.Add(DlcArtistWindow.Button("Cancel network work", () => cancellation?.Cancel()));
         review = new TextField("Reviewed changes") { multiline = true, isReadOnly = true }; review.style.flexGrow = 1; review.style.minHeight = 180; root.Add(review);
-        status = new Label("No live actions run automatically. Set the secret environment variable outside Unity and restart the Editor before connecting."); status.style.whiteSpace = WhiteSpace.Normal; root.Add(status);
+        status = new Label("No live actions run automatically. Review on the Staging connection first, test with a staging build, then review and publish on Production. " +
+            "The secret is read from Key Vault as the signed-in Azure user (or from the environment variable when no vault is set)."); status.style.whiteSpace = WhiteSpace.Normal; root.Add(status);
         controls.SetEnabled(!busy);
         if (changes != null) review.value = Describe();
     }
@@ -93,7 +94,7 @@ public sealed class DlcPlayFabWindow : EditorWindow
         string captured = Fingerprint(json, bytes);
         client?.Dispose(); client = new DlcPlayFabClient(connection.titleId);
         status.text = "Connecting to " + connection.environmentName + " / " + connection.titleId + " (read-only review)…";
-        await client.Authenticate(connection.secretEnvironmentVariable, cancellation.Token);
+        await client.Authenticate(connection, cancellation.Token);
         var proposed = new List<DlcPlayFabChange>();
         foreach (string id in ids.OrderBy(id => id, StringComparer.Ordinal))
         {

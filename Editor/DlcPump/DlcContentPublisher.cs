@@ -63,8 +63,30 @@ public static class DlcContentPublisher
             : new List<string>();
     }
 
+    /// <summary>The staging folder Publish writes to.</summary>
     public static string Destination(DlcPublishingSettings settings) =>
         $"{settings.AccountUrl}/{settings.container}/{CurrentPlatform}/{CurrentAppVersion}/";
+
+    /// <summary>The production folder Promote writes to.</summary>
+    public static string ProductionDestination(DlcPublishingSettings settings) =>
+        $"{settings.AccountUrl}/{settings.productionContainer}/{CurrentPlatform}/{CurrentAppVersion}/";
+
+    /// <summary>
+    /// Copies what's published in the staging container for the current platform and app version to the production
+    /// container, unchanged (bundles, catalog, product manifests, then products.json). Rerun to continue after an error.
+    /// </summary>
+    /// <param name="products">Only list these products in production's products.json; null for every staged product.</param>
+    public static Task<(int code, string output)> Promote(DlcPublishingSettings settings, IEnumerable<string> products, bool dryRun,
+        bool allowNewCatalog = false, Action<string> onLine = null, Action<DlcPublishProgress> onProgress = null, CancellationToken cancel = default)
+    {
+        if (string.IsNullOrWhiteSpace(settings.productionContainer)) return Task.FromResult((1, $"productionContainer is empty in {settings.name}."));
+        var args = new List<string> { "promote", "--to-container", settings.productionContainer.Trim(), "--platform", CurrentPlatform,
+            "--app-version", CurrentAppVersion, "--progress" };
+        var only = products?.ToList();
+        if (only != null && only.Count > 0) { args.Add("--product"); args.AddRange(only); }
+        if (allowNewCatalog) args.Add("--allow-new-catalog");
+        return Run(settings, args, dryRun, onLine, onProgress, cancel);
+    }
 
     /// <param name="allowNewCatalog">Publish even if the app-version folder already has a catalog with a different
     /// name. Only for an app version that hasn't shipped: installed players keep loading the old catalog.</param>
@@ -123,20 +145,24 @@ public static class DlcContentPublisher
         catch (Exception e) { return (null, "Couldn't read the remote state: " + e.Message); }
     }
 
-    public static Task<(int code, string output)> Status(DlcPublishingSettings settings) =>
-        Run(settings, new List<string> { "status", "--platform", CurrentPlatform, "--app-version", CurrentAppVersion }, false);
+    public static Task<(int code, string output)> Status(DlcPublishingSettings settings, bool production = false) =>
+        Run(settings, new List<string> { "status", "--platform", CurrentPlatform, "--app-version", CurrentAppVersion }, false,
+            container: production ? settings.productionContainer : null);
 
-    public static Task<(int code, string output)> Rollback(DlcPublishingSettings settings, string productId, string version, bool drop, bool dryRun) =>
+    public static Task<(int code, string output)> Rollback(DlcPublishingSettings settings, string productId, string version, bool drop, bool dryRun,
+        bool production = false) =>
         Run(settings, new List<string> { "rollback", "--platform", CurrentPlatform, "--app-version", CurrentAppVersion,
-            "--product", productId, drop ? "--drop" : "--to", version }, dryRun);
+            "--product", productId, drop ? "--drop" : "--to", version }, dryRun, container: production ? settings.productionContainer : null);
 
     static Task<(int code, string output)> Run(DlcPublishingSettings settings, List<string> args, bool dryRun,
         Action<string> onLine = null, Action<DlcPublishProgress> onProgress = null, CancellationToken cancel = default,
-        Action<string, string> onMachine = null)
+        Action<string, string> onMachine = null, string container = null)
     {
         if (string.IsNullOrWhiteSpace(settings.accountName)) return Task.FromResult((1, $"accountName is empty in {settings.name}."));
+        container = string.IsNullOrWhiteSpace(container) ? settings.container : container.Trim();
+        if (string.IsNullOrWhiteSpace(container)) return Task.FromResult((1, $"A container is empty in {settings.name}."));
         args.InsertRange(0, new[] { DlcPythonProcess.PackageTool("DlcPublisher", "publish_dlc.py") });
-        args.AddRange(new[] { "--account-url", settings.AccountUrl, "--container", settings.container,
+        args.AddRange(new[] { "--account-url", settings.AccountUrl, "--container", container,
             "--log-dir", Path.GetFullPath(Path.Combine("Logs", "dlc-publish")) });
         if (dryRun) args.Add("--dry-run");
         // No overall limit: big uploads take as long as they take. The runner stops only when cancelled, or when

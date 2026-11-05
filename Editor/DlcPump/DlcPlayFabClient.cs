@@ -27,6 +27,20 @@ public sealed class DlcPlayFabClient : IDlcPlayFabTransport, IDisposable
         if (!Regex.IsMatch(variable ?? "", "^[A-Za-z_][A-Za-z0-9_]*$")) throw new InvalidOperationException("Enter the environment variable NAME, not a secret.");
         string secret = Environment.GetEnvironmentVariable(variable);
         if (string.IsNullOrEmpty(secret)) throw new InvalidOperationException("Set " + variable + " outside Unity, then restart the Editor. Credentials are never stored in project assets.");
+        await AuthenticateWithSecret(secret, cancellation);
+    }
+
+    /// <summary>Signs in with the connection's secret: from Key Vault when it names one, else the environment variable.</summary>
+    public async Task Authenticate(DlcPlayFabConnection connection, CancellationToken cancellation)
+    {
+        if (string.IsNullOrWhiteSpace(connection.keyVaultName)) { await Authenticate(connection.secretEnvironmentVariable, cancellation); return; }
+        string secret = await DlcAzureCli.ReadSecret(connection.keyVaultName.Trim(), (connection.keyVaultSecretName ?? "").Trim());
+        cancellation.ThrowIfCancellationRequested();
+        await AuthenticateWithSecret(secret, cancellation);
+    }
+
+    async Task AuthenticateWithSecret(string secret, CancellationToken cancellation)
+    {
         var data = await Post("Authentication/GetEntityToken", new JObject(), "X-SecretKey", secret, cancellation);
         if ((string)data["Entity"]?["Type"] != "title" || !string.Equals((string)data["Entity"]?["Id"], title, StringComparison.OrdinalIgnoreCase)) throw new InvalidOperationException("The authenticated entity does not match this title.");
         token = (string)data["EntityToken"];

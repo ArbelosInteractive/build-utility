@@ -79,7 +79,8 @@ namespace Arbelos.BuildUtility.Runtime
         public DlcContentService(DlcRemoteConfig config, string cacheRoot = null)
         {
             if (!config) throw new ArgumentNullException(nameof(config));
-            if (string.IsNullOrWhiteSpace(config.cdnBaseUrl)) throw new ArgumentException("DlcRemoteConfig.cdnBaseUrl is empty.", nameof(config));
+            if (string.IsNullOrWhiteSpace(config.ActiveBaseUrl))
+                throw new ArgumentException($"DlcRemoteConfig has no {(DlcEnvironment.Staging ? "stagingCdnBaseUrl" : "cdnBaseUrl")} ({DlcEnvironment.Name}).", nameof(config));
             this.config = config;
             platform = DlcContentPaths.CurrentPlatform();
             appVersion = Application.version;
@@ -339,7 +340,7 @@ namespace Arbelos.BuildUtility.Runtime
 
         string Url(string relative)
         {
-            string url = DlcContentPaths.AppVersionFolderUrl(config.cdnBaseUrl, platform, appVersion) + relative;
+            string url = DlcContentPaths.AppVersionFolderUrl(config.ActiveBaseUrl, platform, appVersion) + relative;
             if (config.accessMode == DlcContentAccessMode.SignedUrl)
             {
                 if (UrlSigner == null)
