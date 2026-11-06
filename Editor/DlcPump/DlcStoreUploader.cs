@@ -51,10 +51,13 @@ public static class DlcStoreUploader
             : new List<string>();
 
     /// <summary>The items per platform, or an error.</summary>
-    public static async Task<(Dictionary<string, List<Item>> items, string error)> List(string python, string export)
+    /// <param name="iconFolder">PlayFab icon folder (full path) or null; items without an icon are listed with a problem.</param>
+    public static async Task<(Dictionary<string, List<Item>> items, string error)> List(string python, string export, string iconFolder = null)
     {
         string json = null;
-        var (code, output) = await DlcPythonProcess.Run(python, new[] { Script, "--export", export, "--list" },
+        var listArgs = new List<string> { Script, "--export", export, "--list" };
+        if (!string.IsNullOrEmpty(iconFolder)) listArgs.AddRange(new[] { "--icons", iconFolder });
+        var (code, output) = await DlcPythonProcess.Run(python, listArgs,
             onMachine: (kind, data) => { if (kind == "items") json = data; }, idleTimeout: TimeSpan.FromMinutes(2));
         if (code != 0 || json == null) return (null, output.Trim().Length > 0 ? output.Trim() : $"upload_all.py --list failed (exit {code}).");
         try
@@ -94,7 +97,7 @@ public static class DlcStoreUploader
     public static Task<(int code, string output)> Upload(string python, string export, string vault,
         IDictionary<string, List<string>> items, bool dryRun, bool activateGoogle, bool publishPlayFab,
         Action<string> onLine, Action<string, string> onPlatform, Action<string, string, string> onItem, CancellationToken cancel,
-        bool playFabProduction = false, bool skipStagingCheck = false)
+        bool playFabProduction = false, bool skipStagingCheck = false, string iconFolder = null)
     {
         var platforms = Platforms.Where(items.ContainsKey).ToList();
         var args = new List<string> { Script, "--export", export, "--vault", vault ?? "", "--log-dir", LogDir, "--progress", "--only" };
@@ -108,6 +111,7 @@ public static class DlcStoreUploader
         {
             args.AddRange(new[] { "--playfab-target", playFabProduction ? "production" : "staging" });
             if (playFabProduction && skipStagingCheck) args.Add("--skip-staging-check");
+            if (!string.IsNullOrEmpty(iconFolder)) args.AddRange(new[] { "--icons", iconFolder });
         }
 
         return DlcPythonProcess.Run(python, args, onLine, (kind, json) =>

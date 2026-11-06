@@ -264,7 +264,12 @@ public sealed class DlcStoreExportWindow : EditorWindow
                     : $"{errors.Count} wave problem(s):\n" + string.Join("\n", errors);
             }
         }
-        if (selectedWaveIds.Count > 0)
+        var promotions = waves.Where(w => w.promotion && selectedWaveIds.Contains(w.id)).ToList();
+        if (promotions.Count > 0)
+            EditorGUILayout.HelpBox($"{string.Join(", ", promotions.Select(w => w.name))}: promotion wave(s) (\"Feature existing products only\" is ticked in the Release Waves window). " +
+                                    "They don't set PlayFab start or end dates; they only add promotion metadata (DisplayProperties.dlcPump.promotions). " +
+                                    "To set the products' start dates, untick that option and export again.", MessageType.Warning);
+        if (selectedWaveIds.Count > promotions.Count)
             EditorGUILayout.HelpBox("Exported PlayFab items of the selected waves get their start and end dates (and are hidden while a wave is paused). " +
                                     "Other products keep the dates they already have in PlayFab when they're uploaded. Dates take effect when the item is published.",
                                     MessageType.None);
@@ -310,9 +315,15 @@ public sealed class DlcStoreExportWindow : EditorWindow
         EditorPrefs.SetString(PrefKey("parent"), parent);
         AssetDatabase.SaveAssets();
         string output = DlcStoreCatalogExport.Export(manifest, settings.options, parent, DlcAppleScreenshot.Prepare, waves);
-        int dated = waves == null ? 0 : (waves["waves"] as JArray).SelectMany(w => w["productIds"]).Select(t => (string)t).Distinct().Count();
+        var exportedWaves = waves == null ? new List<JObject>() : (waves["waves"] as JArray).OfType<JObject>().ToList();
+        var releaseWaves = exportedWaves.Where(w => (string)w["kind"] == "release").ToList();
+        var promotionWaves = exportedWaves.Where(w => (string)w["kind"] == "promotion").ToList();
+        int dated = releaseWaves.SelectMany(w => w["productIds"]).Select(t => (string)t).Distinct().Count();
+        int promoted = promotionWaves.SelectMany(w => w["productIds"]).Select(t => (string)t).Distinct().Count();
         report = $"Exported all {((JArray)manifest["products"]).Count} configured products, ordered requests, validation report and instructions to {output}\n" +
-                 (waves != null ? $"PlayFab dates set from {selectedWaveIds.Count} release wave(s) for {dated} product(s); see release-waves.json.\n" : "") +
+                 (releaseWaves.Count > 0 ? $"PlayFab dates set from {releaseWaves.Count} release wave(s) for {dated} product(s); see release-waves.json.\n" : "") +
+                 (promotionWaves.Count > 0 ? $"{promotionWaves.Count} promotion wave(s) added promotion metadata to {promoted} product(s) but NO start/end dates " +
+                                             "(untick \"Feature existing products only\" in Release Waves to make a wave set dates).\n" : "") +
                  "It's selected in Upload below.";
         uploadExport = output;
         LoadItems();
@@ -337,8 +348,36 @@ public sealed class DlcStoreExportWindow : EditorWindow
                 EditorGUILayout.PropertyField(so.FindProperty("azureTenant"));
                 EditorGUILayout.PropertyField(so.FindProperty("pythonExecutable"));
                 bool changed = EditorGUI.EndChangeCheck();
+                bool iconsChanged = false;
+                using (new EditorGUILayout.HorizontalScope())
+                {
+                    EditorGUI.BeginChangeCheck();
+                    EditorGUILayout.PropertyField(so.FindProperty("playFabIconFolder"), new GUIContent("PlayFab Icon Folder",
+                        so.FindProperty("playFabIconFolder").tooltip));
+                    iconsChanged = EditorGUI.EndChangeCheck();
+                    if (GUILayout.Button("…", GUILayout.Width(24)))
+                    {
+                        string picked = EditorUtility.OpenFolderPanel("PlayFab icon folder", settings.PlayFabIconFolderFullPath() ?? "Assets", "");
+                        if (!string.IsNullOrEmpty(picked))
+                        {
+                            string root = Path.GetDirectoryName(Application.dataPath).Replace('\\', '/') + "/";
+                            picked = picked.Replace('\\', '/');
+                            so.FindProperty("playFabIconFolder").stringValue = picked.StartsWith(root, StringComparison.OrdinalIgnoreCase) ? picked.Substring(root.Length) : picked;
+                            iconsChanged = true;
+                        }
+                    }
+                }
                 so.ApplyModifiedProperties();
-                if (changed) AssetDatabase.SaveAssets();
+                if (changed || iconsChanged) AssetDatabase.SaveAssets();
+                if (iconsChanged && !string.IsNullOrEmpty(uploadExport)) LoadItems(); // re-check which items have an icon
+                string icons = settings.PlayFabIconFolderFullPath();
+                if (icons == null)
+                    EditorGUILayout.HelpBox("No icon folder: PlayFab thumbnails are left as they are.", MessageType.None);
+                else if (!Directory.Exists(icons))
+                    EditorGUILayout.HelpBox("The icon folder doesn't exist: " + icons + ". PlayFab uploads stop until it does (or clear the field).", MessageType.Warning);
+                else
+                    EditorGUILayout.LabelField(" ", $"{Directory.GetFiles(icons, "*.png").Length} PNG(s); each item uses <product ID>.png, else default_<content type>.png.",
+                        EditorStyles.miniLabel);
                 using (new EditorGUILayout.HorizontalScope())
                 {
                     EditorGUILayout.LabelField(" ", "Logs: " + DlcStoreUploader.LogDir, EditorStyles.miniLabel);
@@ -500,7 +539,7 @@ public sealed class DlcStoreExportWindow : EditorWindow
         string export = uploadExport;
         try
         {
-            var (loaded, error) = await DlcStoreUploader.List(settings.pythonExecutable, export);
+            var (loaded, error) = await DlcStoreUploader.List(settings.pythonExecutable, export, settings.PlayFabIconFolderFullPath());
             if (export != uploadExport) return; // picked another export meanwhile
             items = loaded;
             itemsError = error;
@@ -634,7 +673,7 @@ public sealed class DlcStoreExportWindow : EditorWindow
                 l => { lock (live) { liveTail.Enqueue(l); while (liveTail.Count > 200) liveTail.Dequeue(); liveDirty = true; } },
                 (p, state) => { lock (live) { livePlatforms.Add((p, state)); liveDirty = true; } },
                 (p, name, status) => { lock (live) { liveItems.Add((p, name, status)); liveDirty = true; } },
-                cancelSource.Token, playFabProduction, skipStagingCheck);
+                cancelSource.Token, playFabProduction, skipStagingCheck, settings.PlayFabIconFolderFullPath());
             Update(); // apply the last statuses
             uploading = false;
             foreach (string p in selection.Keys)
@@ -661,7 +700,7 @@ public sealed class DlcStoreExportWindow : EditorWindow
     async void RefreshStaged()
     {
         string export = uploadExport;
-        var (loaded, error) = await DlcStoreUploader.List(settings.pythonExecutable, export);
+        var (loaded, error) = await DlcStoreUploader.List(settings.pythonExecutable, export, settings.PlayFabIconFolderFullPath());
         if (error != null || loaded == null || export != uploadExport || !loaded.TryGetValue("playfab", out var fresh)) return;
         foreach (var item in Items("playfab"))
             item.staged = fresh.FirstOrDefault(f => f.arg == item.arg)?.staged ?? item.staged;

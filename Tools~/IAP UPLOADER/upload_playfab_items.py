@@ -27,6 +27,10 @@ the input folder (the export root), with a hash of its file. A production upload
 every selected item is in that receipt with the same hash, i.e. exactly this file went to staging
 first. --skip-staging-check turns the check off (for items that were tested some other way).
 
+Icons: with --icons FOLDER every item gets a Thumbnail image: FOLDER/<FriendlyId>.png, else
+FOLDER/default_<ContentType>.png (see iap_icons.py). An item with neither stops the run before anything is sent.
+The icon is only uploaded when the item doesn't already show it (its hash is in DisplayProperties.dlcPump).
+
 Credentials: read from Azure Key Vault. Staging: playfab-staging-title-id, playfab-staging-secret-key;
              production: playfab-title-id, playfab-secret-key.
              The vault name comes from upload_config.json or --vault; sign in with `az login`.
@@ -34,6 +38,7 @@ Install:     pip install requests azure-identity azure-keyvault-secrets
 Usage:       python upload_playfab_items.py --input .\playfab --dry-run
              python upload_playfab_items.py --input .\playfab --publish                     (staging)
              python upload_playfab_items.py --input .\playfab --only wrestler_jazz
+             python upload_playfab_items.py --input .\playfab --icons ..\..\Assets\Editor\StoreIcons --publish
              python upload_playfab_items.py --input .\playfab --target production --publish
 
 Items stay as drafts unless you pass --publish (which sets "Publish": true on each call).
@@ -48,6 +53,7 @@ from pathlib import Path
 import requests
 
 from iap_common import Report, setup_logging
+from iap_icons import attach_icon, has_icon
 from iap_secrets import PLAYFAB_TARGETS, SecretError, Vault
 from iap_staging import receipt_path, record_staging, untested
 
@@ -96,6 +102,23 @@ class PlayFab:
 
     def call(self, path, body):
         return self._post(path, body, {"X-EntityToken": self.token})["data"]
+
+    def upload_image(self, icon):
+        """Uploads an icon PNG to PlayFab's catalog content storage; returns the Thumbnail image entry."""
+        urls = self.call("/Catalog/CreateUploadUrls", {"Files": [{"FileName": f"icon-{icon.sha}.png"}]}).get("UploadUrls") or []
+        if not urls or not urls[0].get("Url") or not urls[0].get("Id"):
+            raise ValueError("PlayFab returned no image upload URL")
+        url, image_id = urls[0]["Url"], urls[0]["Id"]
+        for attempt in range(4):
+            r = self.session.put(url, data=icon.data, timeout=120,
+                                 headers={"x-ms-blob-type": "BlockBlob", "Content-Type": "image/png"})
+            if r.status_code in (429, 500, 502, 503, 504) and attempt < 3:
+                time.sleep(2 ** attempt)
+                continue
+            break
+        if not r.ok:
+            raise ValueError(f"icon upload of {icon.path.name} failed (HTTP {r.status_code})")
+        return {"Id": image_id, "Type": "Thumbnail", "Url": url.split("?", 1)[0]}
 
     def find_draft(self, friendly_id):
         try:
@@ -172,6 +195,15 @@ def merge_existing(existing, item):
     return merged
 
 
+def set_thumbnail(client, item, existing, icon):
+    """Puts the icon on the item to send as its Thumbnail (other images are kept). Returns a word for the log."""
+    if has_icon(existing, icon):
+        return "unchanged"
+    images = [i for i in (item.get("Images") or []) if isinstance(i, dict) and i.get("Type") != "Thumbnail"]
+    item["Images"] = images + [client.upload_image(icon)]
+    return "uploaded"
+
+
 def describe_dates(item):
     start, end = item.get("StartDate"), item.get("EndDate")
     if start is None and end is None and "IsHidden" not in item:
@@ -216,6 +248,8 @@ def main():
                     help="which PlayFab title to upload to (default: staging)")
     ap.add_argument("--skip-staging-check", action="store_true",
                     help="production only: upload even if items weren't uploaded to staging first")
+    ap.add_argument("--icons", type=Path,
+                    help="folder of icon PNGs: <FriendlyId>.png, else default_<ContentType>.png, uploaded as thumbnails")
     ap.add_argument("--dry-run", action="store_true", help="validate and print, call nothing")
     args = ap.parse_args()
     setup_logging("playfab", args.log_file)
@@ -225,6 +259,16 @@ def main():
     items, problems = collect(args.input)
     if args.only:
         items = [i for i in items if i[1] in args.only]
+    icons = {}
+    if args.icons:
+        if not args.icons.is_dir():
+            sys.exit(f"Icon folder not found: {args.icons}")
+        for f, fid, body in items:
+            if fid and isinstance(body.get("Item"), dict):
+                try:
+                    icons[fid] = attach_icon(body, args.icons)  # before the staging check: the icon is part of the hash
+                except (OSError, ValueError) as e:
+                    problems.append(f"{f.name}: {e}")
     if problems:
         print("Problems found, nothing was uploaded:")
         for p in problems:
@@ -252,7 +296,8 @@ def main():
         for f, fid, body in items:
             item = body["Item"]
             print(f"  {fid:<28} {item['ContentType']:<10} \"{item['Title']['NEUTRAL']}\"   ({f.name})"
-                  + ("  [publish]" if args.publish else "") + describe_dates(item))
+                  + ("  [publish]" if args.publish else "") + describe_dates(item)
+                  + (f"  icon {icons[fid].path.name}" if fid in icons else ""))
         print(f"\nDry run: {len(items)} item(s) valid, nothing was sent.")
         return
 
@@ -282,13 +327,17 @@ def main():
             existing = client.find_draft(fid)
             if existing:
                 body["Item"] = merge_existing(existing, body["Item"])
+            thumb = ""
+            if fid in icons:
+                thumb = f"  icon {icons[fid].path.name} {set_thumbnail(client, body['Item'], existing, icons[fid])}"
+            if existing:
                 client.call("/Catalog/UpdateDraftItem", body)
                 report.updated.append(fid)
-                print(f"  {fid}: already existed, values updated (id {existing['Id']}){describe_dates(body['Item'])}")
+                print(f"  {fid}: already existed, values updated (id {existing['Id']}){describe_dates(body['Item'])}{thumb}")
             else:
                 resp = client.call("/Catalog/CreateDraftItem", body)
                 report.created.append(fid)
-                print(f"  {fid}: created new (id {(resp.get('Item') or {}).get('Id', '?')}){describe_dates(body['Item'])}")
+                print(f"  {fid}: created new (id {(resp.get('Item') or {}).get('Id', '?')}){describe_dates(body['Item'])}{thumb}")
             if args.target == "staging":
                 record_staging(receipt, creds["title_id"], fid, items[n][2], args.publish)
         except (ApiError, ValueError) as e:  # the first failure stops the run

@@ -16,6 +16,16 @@ public sealed class DlcStoreExportSettings : ScriptableObject
 
     [Tooltip("Python 3.8+ with: requests pyjwt[crypto] google-auth azure-identity azure-keyvault-secrets (Install packages in the Upload section).")]
     public string pythonExecutable = "python";
+
+    [Tooltip("Folder of PlayFab store icons (PNG), relative to the project or absolute. Each PlayFab item is uploaded with " +
+             "<product or bundle ID>.png as its thumbnail, or default_<content type>.png (e.g. default_wrestler.png) when it has none. " +
+             "Leave empty to leave thumbnails alone.")]
+    public string playFabIconFolder = "Assets/Editor/StoreIcons";
+
+    /// <summary>The icon folder as a full path, or null when none is set.</summary>
+    public string PlayFabIconFolderFullPath() =>
+        string.IsNullOrWhiteSpace(playFabIconFolder) ? null
+            : System.IO.Path.GetFullPath(System.IO.Path.Combine(System.IO.Path.GetDirectoryName(Application.dataPath), playFabIconFolder.Trim()));
 }
 
 [Serializable]

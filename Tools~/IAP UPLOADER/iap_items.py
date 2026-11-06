@@ -74,7 +74,8 @@ def load_google(target):
     return items
 
 
-def load_playfab(target):
+def load_playfab(target, icons=None):
+    from iap_icons import attach_icon
     from iap_staging import receipt_path, staged_state
     target = Path(target)
     files = [target] if target.is_file() else (sorted(target.rglob("*.json")) if target.is_dir() else [])
@@ -87,13 +88,19 @@ def load_playfab(target):
             body = _read(f)
             item = body["Item"]
             fid = next(a["Value"] for a in item["AlternateIds"] if a.get("Type") == "FriendlyId")
+            details, problem = item.get("ContentType", ""), None
+            if icons:
+                try:
+                    details += " \u00b7 icon " + attach_icon(body, icons).path.name  # the hash goes into the item, as on upload
+                except (OSError, ValueError) as e:
+                    problem = str(e)
             items.append({"key": fid, "arg": fid, "id": fid, "name": item.get("Title", {}).get("NEUTRAL", ""),
-                          "details": item.get("ContentType", ""), "problem": None,
+                          "details": details, "problem": problem,
                           "staged": staged_state(receipt, fid, body)})
         except Exception as e:
             items.append(_broken(f.name, e))
     return items
 
 
-def load_items(apple_root, google_input, playfab_input):
-    return {"apple": load_apple(apple_root), "google": load_google(google_input), "playfab": load_playfab(playfab_input)}
+def load_items(apple_root, google_input, playfab_input, icons=None):
+    return {"apple": load_apple(apple_root), "google": load_google(google_input), "playfab": load_playfab(playfab_input, icons)}

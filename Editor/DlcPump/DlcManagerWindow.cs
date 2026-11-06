@@ -195,7 +195,12 @@ public sealed class DlcManagerWindow : EditorWindow
 
     void DrawContent()
     {
-        if (GUILayout.Button("Discover content from project rules")) report = DlcProject.Required.Populate(release);
+        if (GUILayout.Button(new GUIContent("Discover content from project rules",
+                "Clears the content list and fills it again from the project rules, for every product in the release. Edit > Undo restores the old list.")) &&
+            (release.content.Count == 0 || EditorUtility.DisplayDialog("Rediscover DLC content",
+                $"Replace the {release.content.Count} content entries of {release.releaseId} with what the project rules find now?\n\n" +
+                "Entries added by hand and Addressables keys typed by hand are lost. Edit > Undo restores the old list.", "Rediscover", "Cancel")))
+            report = DlcProject.Required.Populate(release);
         EditorGUILayout.HelpBox("Assign content to selected product IDs. Include the actual downloadable prefab or asset and its existing Addressables key. References alone do not create runtime pack grants.", MessageType.Info);
         var serialized = new SerializedObject(release);
         serialized.Update();

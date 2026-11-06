@@ -40,7 +40,7 @@ The catalog adapter currently expects the Unity IAP product-catalog JSON schema.
 1. Choose **New** and save outside Resources, preferably in Assets/Editor/DlcReleases.
 2. Set release ID, minimum client version, Addressables profile and notes. A release has no platform: every release ships to both Android and iOS, and build, export and publish use the editor's active build target (Android or iOS). Run them once per platform.
 3. Select products. Edit listing titles/descriptions if needed; saves retain unknown JSON fields and create backups. Concurrent edits are rejected.
-4. Discover content from project rules. Review required assets and Addressables keys. Discovery preserves manual assignments.
+4. Discover content from project rules. Review required assets and Addressables keys. Discovery clears the content list and fills it again from the rules (after a confirmation), so entries and keys added by hand are replaced; Edit > Undo restores the previous list.
 5. Validate and resolve errors. Save modified content assets before exporting an immutable manifest. Compare against the previous manifest.
 
 ## Build and inspect

@@ -133,6 +133,8 @@ def command(platform, cfg, args, log_path):
         cmd += ["--target", args.playfab_target]
         if args.skip_staging_check:
             cmd.append("--skip-staging-check")
+        if args.icons:
+            cmd += ["--icons", str(args.icons)]
     if cfg["keyvault_name"]:
         cmd += ["--vault", cfg["keyvault_name"]]
     cmd += ["--log-file", str(log_path)]
@@ -194,8 +196,12 @@ def main():
                     help="PlayFab title to upload to (default: staging)")
     ap.add_argument("--skip-staging-check", action="store_true",
                     help="PlayFab production: don't require a matching staging upload first")
+    ap.add_argument("--icons", type=Path,
+                    help="PlayFab: folder of icon PNGs uploaded as thumbnails (<FriendlyId>.png, else default_<ContentType>.png)")
     ap.add_argument("--dry-run", action="store_true", help="validate and print only, nothing is sent")
     args = ap.parse_args()
+    if args.icons:
+        args.icons = args.icons.resolve()
 
     if args.item and not (args.only and len(args.only) == 1):
         ap.error("--item needs exactly one platform, e.g. --only apple --item 0001")
@@ -216,7 +222,7 @@ def main():
             cfg["log_dir"] = args.log_dir.resolve()
     if args.list:
         from iap_items import load_items
-        print("@@items " + json.dumps(load_items(cfg["apple_root"], cfg["google_input"], cfg["playfab_input"])), flush=True)
+        print("@@items " + json.dumps(load_items(cfg["apple_root"], cfg["google_input"], cfg["playfab_input"], args.icons)), flush=True)
         return
     if args.progress:
         os.environ["IAP_PROGRESS"] = "1"  # inherited by the platform scripts, read by iap_common
@@ -236,6 +242,10 @@ def main():
             print(f"  {platform:<8} {cfg[key]}")
 
     problems = preflight(cfg, platforms, args.dry_run, args.playfab_target)
+    if "playfab" in platforms and args.icons and not args.icons.is_dir():
+        problems.append(f"icon folder {args.icons} does not exist")
+    if "playfab" in platforms:
+        print(f"Icons:     {args.icons or 'none (thumbnails are left as they are)'}")
     if problems:
         print("\nCannot start:")
         for p in problems:
