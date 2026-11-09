@@ -4,12 +4,11 @@ using UnityEditor;
 using UnityEngine;
 
 // Editor-only release planning data. Runtime entitlement rules remain authoritative.
-// A release covers every store platform (Android and iOS): export, build and publish use the editor's active build target.
+// A release covers every store platform (Android and iOS) and every app version: export, build and publish use the editor's
+// active build target, app version and Addressables profile.
 public sealed class DlcRelease : ScriptableObject
 {
     public string releaseId = "new-release";
-    public string minimumClientVersion = "";
-    public string addressablesProfile = "";
     [TextArea(3, 10)] public string notes;
     public List<string> productIds = new List<string>();
     public List<DlcReleaseContent> content = new List<DlcReleaseContent>();

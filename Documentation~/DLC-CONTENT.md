@@ -108,7 +108,7 @@ Clients that have already shipped keep the load path baked into their catalog, s
 ## Export, then publish
 
 1. Open **Build Utility > DLC Publish** (also reachable from the DLC Pump header). Pick the publishing settings and the folder that holds your `DlcRelease` assets; every release in it (and its subfolders) is listed. Check the releases to ship.
-2. Switch the editor to Android or iOS and select the releases' Addressables profile. In **Build**, the window reads what's already published for this platform and app version and suggests one of the two buttons: **Full build** when nothing is published yet, **Content update** when a catalog is already there (players of that version only load that catalog). Both buttons stay available; building against the suggestion asks for confirmation first. A content update needs the baseline: **Download from Azure** fetches the stored one.
+2. Switch the editor to Android or iOS and select that platform's Addressables profile (the build and export use the active one). In **Build**, the window reads what's already published for this platform and app version and suggests one of the two buttons: **Full build** when nothing is published yet, **Content update** when a catalog is already there (players of that version only load that catalog). Both buttons stay available; building against the suggestion asks for confirmation first. A content update needs the baseline: **Download from Azure** fetches the stored one.
 3. Click **Validate (dry run)**, then **Export**. The export fails, and writes nothing, if:
    - a content entry's productId isn't in the release's productIds
    - a non-blank `addressablesKey` isn't an Addressables address
@@ -177,7 +177,7 @@ For `<Platform>/<Application.version>/`, the service:
 - **Fetches `products.json`** with `If-None-Match`.
 - **Downloads only what's missing.** It fetches each owned product's current `product.json` only if that version isn't already cached; versions never change, so a cached copy is always valid.
 - **Caches everything** under `persistentDataPath/dlc-content/<Platform>/<appVersion>/`. When offline it uses the cached `products.json`, falling back to the newest cached version that file lists.
-- **Skips products** whose `minimumClientVersion` is newer than the app.
+- **Skips products** whose `minimumClientVersion` is newer than the app. The export always writes it empty: content is already published per app version, so it's kept only for apps already installed.
 - **Checks every key** with `Addressables.LoadResourceLocationsAsync`. If keys are missing, it runs one `CheckForCatalogUpdates` + `UpdateCatalogs` and checks again.
 
 Each product ends with one of these statuses: `Ready`, `NotReady` (keys still missing), `NotInAppVersion`, `RequiresNewerClient` or `Unavailable`. The service never calls `LoadContentCatalogAsync`. Run it after `AddressablesDownloader` has initialized, so the two don't update catalogs at the same time.

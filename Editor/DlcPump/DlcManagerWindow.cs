@@ -87,9 +87,6 @@ public sealed class DlcManagerWindow : EditorWindow
         if (string.IsNullOrEmpty(path)) return;
         if (path.Split('/').Contains("Resources")) { report = "Release assets must be outside Resources."; return; }
         var created = CreateInstance<DlcRelease>();
-        created.minimumClientVersion = PlayerSettings.bundleVersion;
-        var settings = AddressableAssetSettingsDefaultObject.Settings;
-        if (settings) created.addressablesProfile = settings.profileSettings.GetProfileName(settings.activeProfileId);
         AssetDatabase.CreateAsset(created, path);
         Undo.RegisterCreatedObjectUndo(created, "Create DLC release");
         release = created;
@@ -100,7 +97,7 @@ public sealed class DlcManagerWindow : EditorWindow
     {
         var serialized = new SerializedObject(release);
         serialized.Update();
-        foreach (string field in new[] { "releaseId", "minimumClientVersion", "addressablesProfile", "notes" })
+        foreach (string field in new[] { "releaseId", "notes" })
             EditorGUILayout.PropertyField(serialized.FindProperty(field), true);
         serialized.ApplyModifiedProperties();
         if (GUILayout.Button("Save release")) AssetDatabase.SaveAssets();

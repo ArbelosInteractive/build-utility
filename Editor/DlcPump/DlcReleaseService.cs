@@ -50,7 +50,6 @@ public static class DlcReleaseService
         if (!release) { issues.Add("ERROR: Select or create a release."); return issues; }
         if (!Regex.IsMatch(release.releaseId ?? "", @"^[a-z0-9][a-z0-9._-]{0,79}$"))
             issues.Add("ERROR: Release ID must use lowercase letters, digits, dots, underscores or hyphens (maximum 80).");
-        if (string.IsNullOrWhiteSpace(release.minimumClientVersion)) issues.Add("ERROR: Minimum client version is required.");
         if (string.IsNullOrWhiteSpace(release.notes)) issues.Add("WARNING: Release notes are empty.");
         var products = (JArray)Catalog()["products"];
         if (products == null) { issues.Add("ERROR: IAP catalog has no products."); return issues; }
@@ -83,8 +82,6 @@ public static class DlcReleaseService
         if (contentIdentities.Distinct().Count() != contentIdentities.Count()) issues.Add("ERROR: Duplicate content assignment within a product.");
         var settings = AddressableAssetSettingsDefaultObject.Settings;
         if (!settings) issues.Add("ERROR: Addressables settings are missing.");
-        else if (string.IsNullOrEmpty(settings.profileSettings.GetProfileId(release.addressablesProfile)))
-            issues.Add("ERROR: Addressables profile does not exist: " + release.addressablesProfile);
         if (!IsStorePlatform(EditorUserBuildSettings.activeBuildTarget)) issues.Add("WARNING: The active build target is " + EditorUserBuildSettings.activeBuildTarget + ". Switch to Android or iOS before building; every release builds for both.");
         var entries = settings ? settings.groups.Where(g => g).SelectMany(g => g.entries).ToList() : new List<AddressableAssetEntry>();
         foreach (var item in release.content)
@@ -145,8 +142,9 @@ public static class DlcReleaseService
         foreach (var path in AssetDatabase.GetDependencies(settingsPath, true).Concat(new[] { "Packages/manifest.json", "Packages/packages-lock.json", "ProjectSettings/ProjectVersion.txt" }).Distinct().OrderBy(p => p))
             if (File.Exists(path)) configuration.Add(new JObject { ["path"] = path, ["sha256"] = HashFile(path) });
         return new JObject { ["schemaVersion"] = 1, ["releaseId"] = release.releaseId,
-            ["minimumClientVersion"] = release.minimumClientVersion, ["target"] = EditorUserBuildSettings.activeBuildTarget.ToString(), // the platform this snapshot builds for
-            ["profile"] = release.addressablesProfile, ["unityVersion"] = Application.unityVersion,
+            ["target"] = EditorUserBuildSettings.activeBuildTarget.ToString(), // the platform this snapshot builds for
+            ["profile"] = AddressableAssetSettingsDefaultObject.Settings ? AddressableAssetSettingsDefaultObject.Settings.profileSettings.GetProfileName(
+                AddressableAssetSettingsDefaultObject.Settings.activeProfileId) : "", ["unityVersion"] = Application.unityVersion,
             ["configuration"] = configuration, ["uniqueSourceBytes"] = dependencyCache.Values.Sum(d => (long)d["sourceBytes"]),
             ["sizeNote"] = "Source bytes only; not compressed download size.",
             ["notes"] = release.notes ?? "", ["products"] = new JArray(release.productIds.OrderBy(id => id)
@@ -174,7 +172,7 @@ public static class DlcReleaseService
                 else if (!newItems.ContainsKey(key)) lines.Add("REMOVED " + section + " " + key);
                 else if (!JToken.DeepEquals(oldItems[key], newItems[key])) lines.Add("CHANGED " + section + " " + key);
         }
-        foreach (string field in new[] { "minimumClientVersion", "target", "profile", "notes", "unityVersion", "configuration" })
+        foreach (string field in new[] { "target", "profile", "notes", "unityVersion", "configuration" })
             if (!JToken.DeepEquals(before[field], after[field])) lines.Add("CHANGED " + field);
         return lines.Count == 0 ? "No product, content or configuration changes." : string.Join("\n", lines);
     }

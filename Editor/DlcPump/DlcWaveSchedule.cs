@@ -144,7 +144,7 @@ public static class DlcWaveExport
     /// release wave, because a PlayFab item has one start/end at a time:
     /// <list type="bullet">
     /// <item>With <paramref name="waveIds"/> (a store export): only those waves; a product in two of them is an error.</item>
-    /// <item>Without (the Review window): every wave; a product with several (non-overlapping) release windows keeps the
+    /// <item>Without (Release Waves' Export JSON): every wave; a product with several (non-overlapping) release windows keeps the
     /// one active at <paramref name="nowUtc"/>, else the next upcoming one, else the one that ended last.</item>
     /// </list>
     /// </summary>

@@ -353,8 +353,6 @@ public sealed class DlcPublishWindow : EditorWindow
         }
 
         var picked = Checked();
-        string profileError = picked.Count > 0 ? DlcAddressablesBuild.CheckProfile(picked, out _) : null;
-        if (profileError != null) EditorGUILayout.HelpBox(profileError, MessageType.Warning);
         string loadPathWarning = DlcAddressablesBuild.LoadPathWarning();
         if (loadPathWarning != null)
             using (new EditorGUILayout.HorizontalScope())
@@ -370,7 +368,7 @@ public sealed class DlcPublishWindow : EditorWindow
                     catch (Exception e) { report = "Couldn't change Remote.LoadPath: " + e.Message; }
                 }
             }
-        using (new EditorGUI.DisabledScope(picked.Count == 0 || profileError != null))
+        using (new EditorGUI.DisabledScope(picked.Count == 0))
         using (new EditorGUILayout.HorizontalScope())
         {
             if (BuildButton("Full build", suggested == 1)) StartBuild(false);

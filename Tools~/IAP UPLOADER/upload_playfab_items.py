@@ -17,7 +17,13 @@ DisplayProperties such as the thumbnail metadata). The draft's ETag is sent alon
 changed by someone else in the meantime makes the update fail instead of being overwritten.
 Release-wave dates come from the export: a file with StartDate/EndDate sets them, a file
 without keeps the dates the item already has. A file whose DisplayProperties.dlcPump names a
-different wave schedule than the draft's fails, like the DLC PlayFab Review window does.
+different wave schedule than the draft's fails.
+
+Unpublished changes: before anything is written, each existing item's draft is compared with its published
+version. If they differ (someone is editing it in Game Manager, or an earlier upload left a draft), the run stops
+and lists the fields, since publishing would push those edits live too. --allow-unpublished-changes uploads anyway.
+Items that were never published have nothing to protect and aren't checked. Dry runs don't contact PlayFab, so
+they don't check this.
 The first error stops the run. A summary of created / updated items is printed and written
 to a log file (logs\playfab_<date>_<time>.log, or --log-file).
 
@@ -44,8 +50,10 @@ Usage:       python upload_playfab_items.py --input .\playfab --dry-run
 Items stay as drafts unless you pass --publish (which sets "Publish": true on each call).
 """
 import argparse
+import datetime
 import json
 import os
+import re
 import sys
 import time
 from pathlib import Path
@@ -120,6 +128,15 @@ class PlayFab:
             raise ValueError(f"icon upload of {icon.path.name} failed (HTTP {r.status_code})")
         return {"Id": image_id, "Type": "Thumbnail", "Url": url.split("?", 1)[0]}
 
+    def find_published(self, friendly_id):
+        try:
+            return self.call("/Catalog/GetItem",
+                             {"AlternateId": {"Type": ALT_TYPE, "Value": friendly_id}})["Item"]
+        except ApiError as e:
+            if e.not_found:
+                return None
+            raise
+
     def find_draft(self, friendly_id):
         try:
             return self.call("/Catalog/GetDraftItem",
@@ -169,7 +186,7 @@ def merge_existing(existing, item):
     """The draft to send with UpdateDraftItem: the existing draft, with the export file's fields on top.
 
     Fields the file doesn't set keep their PlayFab values. DisplayProperties are merged key by key, and so is
-    DisplayProperties.dlcPump (so the thumbnail hash and pixel-art flag set by the Review window survive).
+    DisplayProperties.dlcPump (so metadata the file doesn't set, such as promotions from other waves, survives).
     Raises ValueError when the file and the draft are managed by different wave schedules.
     """
     merged = {k: v for k, v in existing.items() if k not in READ_ONLY}
@@ -193,6 +210,50 @@ def merge_existing(existing, item):
             merged[key] = value
     merged["Id"] = existing["Id"]
     return merged
+
+
+CONTENT_HOST = re.compile(r"^(pfcatalogcontent\d+\.blob\.core\.windows\.net|content\d+\.prod\.catalog\.playfab\.com)$")
+DATE_RE = re.compile(r"^(\d{4}-\d\d-\d\dT\d\d:\d\d:\d\d)(?:\.(\d+))?(Z|[+-]\d\d:\d\d)?$")
+
+
+def _utc(value):
+    """An ISO date in one canonical form (PlayFab returns the same date with different precision)."""
+    m = DATE_RE.match(value) if isinstance(value, str) else None
+    if not m:
+        return value
+    zone = "+00:00" if m.group(3) in (None, "Z") else m.group(3)
+    parsed = datetime.datetime.fromisoformat(f"{m.group(1)}.{(m.group(2) or '0')[:6].ljust(6, '0')}{zone}")
+    return parsed.astimezone(datetime.timezone.utc).isoformat()
+
+
+def _image(image):
+    """Draft and published image URLs point at different PlayFab hosts; compare by path."""
+    if not isinstance(image, dict) or not isinstance(image.get("Url"), str):
+        return image
+    m = re.match(r"^https://([^/?#]+)(/[^?#]*)", image["Url"])
+    if m and CONTENT_HOST.match(m.group(1)):
+        return {**image, "Url": "playfab-content:" + m.group(2)}
+    return image
+
+
+def comparable(item):
+    out = {k: v for k, v in (item or {}).items() if k not in READ_ONLY and k != "ETag"}
+    for field in ("StartDate", "EndDate"):
+        if out.get(field) is None:
+            out.pop(field, None)
+        else:
+            out[field] = _utc(out[field])
+    if isinstance(out.get("Images"), list):
+        out["Images"] = [_image(i) for i in out["Images"]]
+    return out
+
+
+def unpublished_changes(draft, published):
+    """The fields where the draft differs from the published item ([] when they match or it was never published)."""
+    if not draft or not published:
+        return []
+    a, b = comparable(draft), comparable(published)
+    return sorted(k for k in set(a) | set(b) if a.get(k) != b.get(k))
 
 
 def set_thumbnail(client, item, existing, icon):
@@ -250,6 +311,8 @@ def main():
                     help="production only: upload even if items weren't uploaded to staging first")
     ap.add_argument("--icons", type=Path,
                     help="folder of icon PNGs: <FriendlyId>.png, else default_<ContentType>.png, uploaded as thumbnails")
+    ap.add_argument("--allow-unpublished-changes", action="store_true",
+                    help="upload even if an item's draft has changes that aren't published (they'd be published too)")
     ap.add_argument("--dry-run", action="store_true", help="validate and print, call nothing")
     args = ap.parse_args()
     setup_logging("playfab", args.log_file)
@@ -318,13 +381,31 @@ def main():
         sys.exit(f"Could not authenticate: {e}\n  -> Check title_id and secret_key "
                  "(Game Manager > Settings > Secret keys), then update the playfab-* secrets in the vault.")
 
+    # Read every existing draft first, and stop before writing anything if one has unpublished changes.
+    drafts, blocked = {}, []
+    try:
+        for f, fid, body in items:
+            drafts[fid] = client.find_draft(fid)
+            if drafts[fid] and not args.allow_unpublished_changes:
+                fields = unpublished_changes(drafts[fid], client.find_published(fid))
+                if fields:
+                    blocked.append(f"{fid}: draft differs from the published item in {', '.join(fields)}")
+    except ApiError as e:
+        sys.exit(f"Could not read the existing items: {e}")
+    if blocked:
+        print("Unpublished changes in PlayFab; nothing was uploaded:")
+        for line in blocked:
+            print(f"  - {line}")
+        sys.exit(f"{len(blocked)} item(s) have draft changes that aren't published. Uploading would publish them too. "
+                 "Publish or discard them in Game Manager, or upload with --allow-unpublished-changes.")
+
     report = Report("PlayFab")
     for n, (f, fid, body) in enumerate(items):
         body = json.loads(json.dumps(body))  # copy
         if args.publish:
             body["Publish"] = True
         try:
-            existing = client.find_draft(fid)
+            existing = drafts.get(fid)
             if existing:
                 body["Item"] = merge_existing(existing, body["Item"])
             thumb = ""

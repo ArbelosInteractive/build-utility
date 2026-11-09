@@ -97,7 +97,7 @@ public static class DlcStoreUploader
     public static Task<(int code, string output)> Upload(string python, string export, string vault,
         IDictionary<string, List<string>> items, bool dryRun, bool activateGoogle, bool publishPlayFab,
         Action<string> onLine, Action<string, string> onPlatform, Action<string, string, string> onItem, CancellationToken cancel,
-        bool playFabProduction = false, bool skipStagingCheck = false, string iconFolder = null)
+        bool playFabProduction = false, bool skipStagingCheck = false, string iconFolder = null, bool allowUnpublishedChanges = false)
     {
         var platforms = Platforms.Where(items.ContainsKey).ToList();
         var args = new List<string> { Script, "--export", export, "--vault", vault ?? "", "--log-dir", LogDir, "--progress", "--only" };
@@ -112,6 +112,7 @@ public static class DlcStoreUploader
             args.AddRange(new[] { "--playfab-target", playFabProduction ? "production" : "staging" });
             if (playFabProduction && skipStagingCheck) args.Add("--skip-staging-check");
             if (!string.IsNullOrEmpty(iconFolder)) args.AddRange(new[] { "--icons", iconFolder });
+            if (allowUnpublishedChanges) args.Add("--allow-unpublished-changes");
         }
 
         return DlcPythonProcess.Run(python, args, onLine, (kind, json) =>

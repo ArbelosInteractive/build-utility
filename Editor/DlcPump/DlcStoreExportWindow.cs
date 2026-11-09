@@ -36,7 +36,7 @@ public sealed class DlcStoreExportWindow : EditorWindow
     bool loadingItems, uploading, azureBusy, azureOk;
     string azureStatus = "Azure: not checked yet";
     // Not serialized: the PlayFab target goes back to staging whenever the window reloads.
-    [NonSerialized] bool playFabProduction, skipStagingCheck;
+    [NonSerialized] bool playFabProduction, skipStagingCheck, allowUnpublishedChanges;
     string stagingTitle = "", productionTitle = "";
     System.Threading.CancellationTokenSource cancelSource;
     readonly object live = new object();
@@ -331,6 +331,42 @@ public sealed class DlcStoreExportWindow : EditorWindow
 
     // ------------------------------------------------------------------------------------------------ upload
 
+    void DrawIconFolder()
+    {
+        var so = new SerializedObject(settings);
+        so.Update();
+        bool iconsChanged = false;
+        using (new EditorGUILayout.HorizontalScope())
+        {
+            EditorGUI.BeginChangeCheck();
+            EditorGUILayout.PropertyField(so.FindProperty("playFabIconFolder"), new GUIContent("PlayFab Icon Folder",
+                so.FindProperty("playFabIconFolder").tooltip));
+            iconsChanged = EditorGUI.EndChangeCheck();
+            if (GUILayout.Button("…", GUILayout.Width(24)))
+            {
+                string picked = EditorUtility.OpenFolderPanel("PlayFab icon folder", settings.PlayFabIconFolderFullPath() ?? "Assets", "");
+                if (!string.IsNullOrEmpty(picked))
+                {
+                    string root = Path.GetDirectoryName(Application.dataPath).Replace('\\', '/') + "/";
+                    picked = picked.Replace('\\', '/');
+                    so.FindProperty("playFabIconFolder").stringValue = picked.StartsWith(root, StringComparison.OrdinalIgnoreCase) ? picked.Substring(root.Length) : picked;
+                    iconsChanged = true;
+                }
+            }
+        }
+        so.ApplyModifiedProperties();
+        if (iconsChanged) AssetDatabase.SaveAssets();
+        if (iconsChanged && !string.IsNullOrEmpty(uploadExport)) LoadItems(); // re-check which items have an icon
+        string icons = settings.PlayFabIconFolderFullPath();
+        if (icons == null)
+            EditorGUILayout.HelpBox("No icon folder: PlayFab thumbnails are left as they are.", MessageType.None);
+        else if (!Directory.Exists(icons))
+            EditorGUILayout.HelpBox("The icon folder doesn't exist: " + icons + ". PlayFab uploads stop until it does (or clear the field).", MessageType.Warning);
+        else
+            EditorGUILayout.LabelField(" ", $"{Directory.GetFiles(icons, "*.png").Length} PNG(s); each item uses <product ID>.png, else default_<content type>.png.",
+                EditorStyles.miniLabel);
+    }
+
     void DrawUpload()
     {
         EditorGUILayout.LabelField("Upload", EditorStyles.boldLabel);
@@ -348,36 +384,8 @@ public sealed class DlcStoreExportWindow : EditorWindow
                 EditorGUILayout.PropertyField(so.FindProperty("azureTenant"));
                 EditorGUILayout.PropertyField(so.FindProperty("pythonExecutable"));
                 bool changed = EditorGUI.EndChangeCheck();
-                bool iconsChanged = false;
-                using (new EditorGUILayout.HorizontalScope())
-                {
-                    EditorGUI.BeginChangeCheck();
-                    EditorGUILayout.PropertyField(so.FindProperty("playFabIconFolder"), new GUIContent("PlayFab Icon Folder",
-                        so.FindProperty("playFabIconFolder").tooltip));
-                    iconsChanged = EditorGUI.EndChangeCheck();
-                    if (GUILayout.Button("…", GUILayout.Width(24)))
-                    {
-                        string picked = EditorUtility.OpenFolderPanel("PlayFab icon folder", settings.PlayFabIconFolderFullPath() ?? "Assets", "");
-                        if (!string.IsNullOrEmpty(picked))
-                        {
-                            string root = Path.GetDirectoryName(Application.dataPath).Replace('\\', '/') + "/";
-                            picked = picked.Replace('\\', '/');
-                            so.FindProperty("playFabIconFolder").stringValue = picked.StartsWith(root, StringComparison.OrdinalIgnoreCase) ? picked.Substring(root.Length) : picked;
-                            iconsChanged = true;
-                        }
-                    }
-                }
                 so.ApplyModifiedProperties();
-                if (changed || iconsChanged) AssetDatabase.SaveAssets();
-                if (iconsChanged && !string.IsNullOrEmpty(uploadExport)) LoadItems(); // re-check which items have an icon
-                string icons = settings.PlayFabIconFolderFullPath();
-                if (icons == null)
-                    EditorGUILayout.HelpBox("No icon folder: PlayFab thumbnails are left as they are.", MessageType.None);
-                else if (!Directory.Exists(icons))
-                    EditorGUILayout.HelpBox("The icon folder doesn't exist: " + icons + ". PlayFab uploads stop until it does (or clear the field).", MessageType.Warning);
-                else
-                    EditorGUILayout.LabelField(" ", $"{Directory.GetFiles(icons, "*.png").Length} PNG(s); each item uses <product ID>.png, else default_<content type>.png.",
-                        EditorStyles.miniLabel);
+                if (changed) AssetDatabase.SaveAssets();
                 using (new EditorGUILayout.HorizontalScope())
                 {
                     EditorGUILayout.LabelField(" ", "Logs: " + DlcStoreUploader.LogDir, EditorStyles.miniLabel);
@@ -385,6 +393,7 @@ public sealed class DlcStoreExportWindow : EditorWindow
                 }
             }
 
+        DrawIconFolder();
         DrawAzure();
 
         // Export folder: the ones under the folder exports were last written to, newest first.
@@ -420,8 +429,11 @@ public sealed class DlcStoreExportWindow : EditorWindow
         activateGoogle = EditorGUILayout.ToggleLeft(new GUIContent("Google Play: make purchase options active (--activate)",
             "Off: purchase options are left inactive and can be activated in Play Console."), activateGoogle);
         publishPlayFab = EditorGUILayout.ToggleLeft(new GUIContent("PlayFab: publish the items (--publish)",
-            "Off: items are created or updated as drafts, to review in the DLC PlayFab Review window or Game Manager. " +
+            "Off: items are created or updated as drafts, to check in Game Manager. " +
             "The game only sees published items, so publish on staging to test them in a staging build."), publishPlayFab);
+        allowUnpublishedChanges = EditorGUILayout.ToggleLeft(new GUIContent("PlayFab: include unpublished draft changes (--allow-unpublished-changes)",
+            "Off: the upload stops before writing anything if an item's draft differs from its published version (someone editing it in " +
+            "Game Manager, or an earlier draft upload), because those edits would be published too. On: upload anyway."), allowUnpublishedChanges);
         DrawPlayFabTarget();
 
         for (int i = 0; i < DlcStoreUploader.Platforms.Length; i++) DrawPlatform(i);
@@ -645,7 +657,8 @@ public sealed class DlcStoreExportWindow : EditorWindow
                     (selection.ContainsKey("google") ? $"Google purchase options: {(activateGoogle ? "ACTIVE" : "left inactive")}\n" : "") +
                     (selection.ContainsKey("playfab") ? $"PlayFab items: {(publishPlayFab ? "PUBLISHED" : "drafts")} on the " +
                         (playFabProduction ? $"PRODUCTION title {productionTitle}" : $"staging title {stagingTitle}") +
-                        (playFabProduction && skipStagingCheck ? " (staging check SKIPPED)" : "") + "\n" : "") +
+                        (playFabProduction && skipStagingCheck ? " (staging check SKIPPED)" : "") +
+                        (allowUnpublishedChanges ? ", including any unpublished draft changes" : "") + "\n" : "") +
                     "\nExisting items are updated. The first failure stops the run.", "Upload", "Cancel"))
                 return;
         }
@@ -673,7 +686,7 @@ public sealed class DlcStoreExportWindow : EditorWindow
                 l => { lock (live) { liveTail.Enqueue(l); while (liveTail.Count > 200) liveTail.Dequeue(); liveDirty = true; } },
                 (p, state) => { lock (live) { livePlatforms.Add((p, state)); liveDirty = true; } },
                 (p, name, status) => { lock (live) { liveItems.Add((p, name, status)); liveDirty = true; } },
-                cancelSource.Token, playFabProduction, skipStagingCheck, settings.PlayFabIconFolderFullPath());
+                cancelSource.Token, playFabProduction, skipStagingCheck, settings.PlayFabIconFolderFullPath(), allowUnpublishedChanges);
             Update(); // apply the last statuses
             uploading = false;
             foreach (string p in selection.Keys)

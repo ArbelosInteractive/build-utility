@@ -111,22 +111,6 @@ public static class DlcAzureCli
 
     public static Task Logout() => Find() == null ? Task.CompletedTask : Run(new[] { "logout" }, 60);
 
-    /// <summary>Reads one Key Vault secret as the signed-in user. The value is returned, never logged.</summary>
-    public static async Task<string> ReadSecret(string vault, string name)
-    {
-        if (Find() == null) throw new InvalidOperationException(NotInstalled);
-        if (!System.Text.RegularExpressions.Regex.IsMatch(vault ?? "", "^[A-Za-z0-9-]{3,24}$")) throw new InvalidOperationException("Enter the Key Vault name.");
-        if (!System.Text.RegularExpressions.Regex.IsMatch(name ?? "", "^[A-Za-z0-9-]{1,127}$")) throw new InvalidOperationException("Enter the Key Vault secret name.");
-        var r = await Run(new[] { "keyvault", "secret", "show", "--vault-name", vault, "--name", name, "--query", "value", "-o", "tsv" }, 90);
-        string value = r.stdout.Trim();
-        if (r.code != 0 || value.Length == 0)
-        {
-            string reason = (r.stderr ?? "").Trim().Split('\n').FirstOrDefault(l => l.Trim().Length > 0) ?? $"exit {r.code}";
-            throw new InvalidOperationException($"Couldn't read secret '{name}' from Key Vault '{vault}': {reason}. Sign in to Azure, and check you have the 'Key Vault Secrets User' role.");
-        }
-        return value;
-    }
-
     /// <summary>code -1: couldn't start, -2: timed out, -3: cancelled.</summary>
     static async Task<(int code, string stdout, string stderr)> Run(IEnumerable<string> args, int timeoutSeconds,
         Dictionary<string, string> env = null, Action<Process> started = null)

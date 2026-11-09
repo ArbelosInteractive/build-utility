@@ -135,6 +135,8 @@ def command(platform, cfg, args, log_path):
             cmd.append("--skip-staging-check")
         if args.icons:
             cmd += ["--icons", str(args.icons)]
+        if args.allow_unpublished_changes:
+            cmd.append("--allow-unpublished-changes")
     if cfg["keyvault_name"]:
         cmd += ["--vault", cfg["keyvault_name"]]
     cmd += ["--log-file", str(log_path)]
@@ -198,6 +200,8 @@ def main():
                     help="PlayFab production: don't require a matching staging upload first")
     ap.add_argument("--icons", type=Path,
                     help="PlayFab: folder of icon PNGs uploaded as thumbnails (<FriendlyId>.png, else default_<ContentType>.png)")
+    ap.add_argument("--allow-unpublished-changes", action="store_true",
+                    help="PlayFab: upload even if an item's draft has unpublished changes (they'd be published too)")
     ap.add_argument("--dry-run", action="store_true", help="validate and print only, nothing is sent")
     args = ap.parse_args()
     if args.icons:

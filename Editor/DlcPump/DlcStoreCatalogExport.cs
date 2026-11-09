@@ -156,8 +156,8 @@ public static class DlcStoreCatalogExport
         => BuildPackage(manifest, o, prepareAppleScreenshot, out _);
 
     /// <param name="waves">Optional schedule from <see cref="DlcWaveExport.Build"/> (selected waves only). Each PlayFab
-    /// item in it gets its StartDate, EndDate, IsHidden and dlcPump metadata, exactly as the PlayFab Review window
-    /// would set them, so new items are created with their dates and are never live without them.</param>
+    /// item in it gets its StartDate, EndDate, IsHidden and dlcPump metadata (<see cref="DlcPlayFabPlan.Apply"/>),
+    /// so new items are created with their dates and are never live without them.</param>
     public static Dictionary<string, string> Build(JObject manifest, DlcStoreExportOptions o, Func<byte[], byte[]> prepareAppleScreenshot, JObject waves)
         => BuildPackage(manifest, o, prepareAppleScreenshot, out _, waves);
 

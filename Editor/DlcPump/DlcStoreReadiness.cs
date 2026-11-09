@@ -9,7 +9,6 @@ public static class DlcStoreReadiness
     public static JObject Requirements(JObject manifest)
     {
         return new JObject { ["schemaVersion"] = 1, ["releaseId"] = manifest["releaseId"],
-            ["minimumClientVersion"] = manifest["minimumClientVersion"],
             ["products"] = new JArray(((JArray)manifest["products"]).Select(p => new JObject {
                 ["id"] = p["id"], ["type"] = "NonConsumable", ["title"] = p["defaultDescription"]?["title"],
                 ["description"] = p["defaultDescription"]?["description"], ["storeIDs"] = p["storeIDs"]?.DeepClone(),

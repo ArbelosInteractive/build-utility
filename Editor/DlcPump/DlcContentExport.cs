@@ -15,7 +15,7 @@ using UnityEngine.AddressableAssets.ResourceLocators;
 
 public sealed class DlcContentProductDraft
 {
-    public string productId, releaseId, minimumClientVersion, notes;
+    public string productId, releaseId, notes;
     public List<string> keys = new List<string>();
 }
 
@@ -130,16 +130,12 @@ public static class DlcContentExport
                 keysByProduct[pid].Add(key);
             }
 
-            if (!string.IsNullOrWhiteSpace(release.minimumClientVersion) && !string.IsNullOrEmpty(appVersion)
-                && !DlcVersion.Satisfies(appVersion, release.minimumClientVersion))
-                r.warnings.Add($"{rel}: minimumClientVersion {release.minimumClientVersion} is newer than app version {appVersion}; clients of {appVersion} will skip these products.");
-
             foreach (var kv in keysByProduct.OrderBy(k => k.Key, StringComparer.Ordinal))
             {
                 if (kv.Value.Count == 0) r.localOnlyProducts.Add(kv.Key);
                 r.products.Add(new DlcContentProductDraft {
                     productId = kv.Key, releaseId = release.releaseId,
-                    minimumClientVersion = release.minimumClientVersion ?? "", notes = release.notes ?? "",
+                    notes = release.notes ?? "",
                     keys = kv.Value.ToList() });
             }
         }
@@ -155,9 +151,7 @@ public static class DlcContentExport
             r.errors.Add($"Active build target is {target}. DLC is exported for Android or iOS: switch platform and build Addressables first.");
         if (!DlcContentPaths.IsSafeSegment(r.appVersion)) r.errors.Add($"App version '{r.appVersion}' can't be used as a folder name.");
 
-        var profiles = releases.Select(x => (x.addressablesProfile ?? "").Trim()).Distinct().ToList();
-        if (profiles.Count > 1) { r.errors.Add("Selected releases use different Addressables profiles: " + string.Join(", ", profiles)); return; }
-        r.profileName = profiles[0].Length > 0 ? profiles[0] : settings.profileSettings.GetProfileName(settings.activeProfileId);
+        r.profileName = settings.profileSettings.GetProfileName(settings.activeProfileId); // the profile the build used
         string profileId = settings.profileSettings.GetProfileId(r.profileName);
         if (string.IsNullOrEmpty(profileId)) { r.errors.Add($"Addressables profile '{r.profileName}' doesn't exist."); return; }
         if (!settings.BuildRemoteCatalog) r.errors.Add("Addressables 'Build Remote Catalog' is off. The DLC pipeline needs one remote catalog per app version.");
@@ -295,7 +289,7 @@ public static class DlcContentExport
                 ["schemaVersion"] = DlcContentPaths.SchemaVersion, ["productId"] = p.productId,
                 ["version"] = null, // assigned by publish_dlc.py
                 ["platform"] = r.platform, ["appVersion"] = r.appVersion, ["releaseId"] = p.releaseId,
-                ["minimumClientVersion"] = p.minimumClientVersion,
+                ["minimumClientVersion"] = "", // kept for installed apps; content is already per app version
                 ["keys"] = new JArray(p.keys), ["catalogBuild"] = r.catalogBuild, ["notes"] = p.notes };
             DlcReleaseService.WriteNew(Path.Combine(dir, p.productId, DlcContentPaths.ProductFile), product.ToString(Formatting.Indented));
         }

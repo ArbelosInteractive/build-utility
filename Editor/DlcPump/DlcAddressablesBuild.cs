@@ -26,17 +26,13 @@ public static class DlcAddressablesBuild
 
     public static bool Building { get; private set; }
 
-    /// <summary>The checked releases' Addressables profile, or an error when they don't share one or it isn't active.</summary>
-    public static string CheckProfile(IList<DlcRelease> releases, out string profile)
+    /// <summary>The active Addressables profile (the build always uses it), or an error when there are no Addressables settings.</summary>
+    public static string CheckProfile(out string profile)
     {
         profile = null;
         var settings = AddressableAssetSettingsDefaultObject.Settings;
         if (!settings) return "No Addressables settings found in this project.";
-        string active = settings.profileSettings.GetProfileName(settings.activeProfileId);
-        var profiles = (releases ?? new List<DlcRelease>()).Where(r => r).Select(r => (r.addressablesProfile ?? "").Trim()).Distinct().ToList();
-        if (profiles.Count > 1) return "The checked releases use different Addressables profiles: " + string.Join(", ", profiles) + ".";
-        profile = profiles.Count == 1 && profiles[0].Length > 0 ? profiles[0] : active;
-        if (profile != active) return $"The checked releases use Addressables profile '{profile}', but '{active}' is active. Select it in the Addressables Groups window.";
+        profile = settings.profileSettings.GetProfileName(settings.activeProfileId);
         return null;
     }
 
@@ -117,7 +113,7 @@ public static class DlcAddressablesBuild
             return $"The active build target is {EditorUserBuildSettings.activeBuildTarget}. Switch to Android or iOS first; every release builds for both.";
         releases = (releases ?? new List<DlcRelease>()).Where(r => r).ToList();
         if (releases.Count == 0) return "Check the releases this build is for.";
-        string profileError = CheckProfile(releases, out string profile);
+        string profileError = CheckProfile(out string profile);
         if (profileError != null) return profileError;
 
         bool update = baselinePath != null;

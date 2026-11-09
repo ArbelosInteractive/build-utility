@@ -3,12 +3,14 @@
 For each item the icon is <folder>/<FriendlyId>.png (a product or bundle ID), else
 <folder>/default_<ContentType>.png (e.g. default_wrestler.png). An item with neither can't be uploaded.
 
-The icon's SHA-256 is written into the item as DisplayProperties.dlcPump.thumbnailSha256 (the same field the
-DLC PlayFab Review window uses). So the staging receipt's item hash covers the icon too, and an icon that is
-already on the item isn't uploaded again.
+The icon's SHA-256 is written into the item as DisplayProperties.dlcPump.thumbnailSha256, so the staging
+receipt's item hash covers the icon too, and an icon that is already on the item isn't uploaded again.
+DisplayProperties.dlcPump.pixelArt comes from the icon's Unity import settings (<icon>.png.meta): Point filtering
+(Icon Studio's pixel-art mode) means true, and the game then draws the icon without smoothing.
 No dependencies beyond the standard library, so the item listing can use it too.
 """
 import hashlib
+import re
 from pathlib import Path
 
 PNG_SIGNATURE = b"\x89PNG\r\n\x1a\n"
@@ -20,6 +22,18 @@ class Icon:
         self.data = data
         self.sha = hashlib.sha256(data).hexdigest()
         self.is_default = self.path.name.lower().startswith("default_")
+        self.pixel_art = pixel_art(self.path)
+
+
+def pixel_art(path):
+    """From the Unity import settings next to the PNG: True for Point filtering, False for any other,
+    None when there's no .meta file (the item's flag is then left as it is)."""
+    try:
+        text = Path(str(path) + ".meta").read_text(encoding="utf-8", errors="replace")
+    except OSError:
+        return None
+    match = re.search(r"^\s*filterMode:\s*(-?\d+)\s*$", text, re.M)
+    return None if match is None else match.group(1) == "0"
 
 
 def _friendly_id(item):
@@ -59,6 +73,8 @@ def attach_icon(body, folder):
     if not isinstance(pump, dict):
         pump = display["dlcPump"] = {}
     pump["thumbnailSha256"] = icon.sha
+    if icon.pixel_art is not None:
+        pump["pixelArt"] = icon.pixel_art
     return icon
 
 
