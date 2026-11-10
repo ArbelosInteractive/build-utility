@@ -13,6 +13,7 @@ There are two containers in the same storage account, with the same layout:
 | Written by | **Publish** (and Rollback with *Staging*) | **Promote to production** only (and Rollback with *Production*) |
 | Read by | staging builds and the Editor's staging Play Mode | store builds |
 | Content-state baseline | stored here | not copied |
+| App Addressables for Cloud Build | stored here | not copied |
 
 The flow: build, export, **Publish** to staging, test with a staging build (or switch Play Mode to staging in **Build Utility > TSW Staging Build**), then **Promote to production** in DLC Publish. Promote copies the tested files byte for byte; nothing is rebuilt or re-exported. The PlayFab side works the same way: DLC Store Export uploads to the staging title first (see `Tools~/IAP UPLOADER/README.md`).
 
@@ -45,6 +46,7 @@ dlc-staging/ (and dlc-production/)             container (DlcPublishingSettings.
   _build-state/
     Android/1.4.0/addressables_content_state.bin   the full build's content-state file, for content updates;
                                                    stored once, never read by the game
+    Android/1.4.0/player-addressables.zip          the app's own Addressables output, restored by Cloud Build
 ```
 
 `products.json`:
@@ -93,6 +95,18 @@ If *Build Addressables on Player Build* is on, building the app runs another ful
 Content update, step by step (once per platform): switch the editor to Android or iOS, check the releases, click **Download from Azure**, click **Content update**, then export and publish as usual.
 
 Clients that have already shipped keep the load path baked into their catalog, so changing the profile only affects new builds.
+
+### App Addressables for Cloud Build
+
+Every player build contains the app's own Addressables output: `Library/com.unity.addressables/aa/<Platform>` (settings.json, the local catalog, link.xml and the content built into the app). Unity copies that folder into the player; it doesn't have to be built in the same place. So Addressables are built only on your machine, with DLC Publish, and the cloud build ships that output:
+
+- **Export** packs it as `player-addressables.zip` when it belongs to the exported catalog, with the CRCs of the remote build's files (for `GameAddressableData`). If it doesn't (Addressables rebuilt since), the export warns and leaves it out.
+- **Publish** stores it at `_build-state/<Platform>/<appVersion>/player-addressables.zip` in the staging container during step 2. An identical file is skipped; a different one (after a content update, say) replaces it.
+- **Unity Cloud Build** calls `DlcPlayerContent.RestoreForCloudBuild()` in its pre-export method, instead of building Addressables. It downloads the package for the active platform and `PlayerSettings.bundleVersion`, checks it's for that platform and version, unpacks it into `Library/com.unity.addressables/aa/<Platform>` and writes the CRCs into the `GameAddressableData` asset in Resources. Leave the build configuration's own Addressables build off, and *Build Addressables on Player Build* off.
+
+The app then ships exactly the build whose catalog was published, so its built-in content always matches the remote catalog.
+
+Cloud Build reads the storage account and staging container from the `DlcPublishingSettings` asset (or `DLC_STORAGE_ACCOUNT` / `DLC_STORAGE_CONTAINER`). To sign in, set `DLC_AZURE_TENANT_ID`, `DLC_AZURE_CLIENT_ID` and `DLC_AZURE_CLIENT_SECRET` in the build target's environment variables (`TENANT_ID`, `CLIENT_ID`, `CLIENT_SECRET` also work): a service principal with **Storage Blob Data Reader** on the staging container. With none set it reads anonymously, which works only if the container allows public read. A missing package fails the build: publish a build of that platform and app version first.
 
 ## One-time Azure setup
 

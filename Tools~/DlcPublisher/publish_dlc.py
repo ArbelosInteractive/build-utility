@@ -9,6 +9,9 @@ Layout in the container (default "dlc-content"):
     <Platform>/<appVersion>/<productId>/v<N>/product.json   immutable
     _build-state/<Platform>/<appVersion>/addressables_content_state.bin   the full build's content-state file,
                                                       for content updates; not used by the game
+    _build-state/<Platform>/<appVersion>/player-addressables.zip   the app's own Addressables output
+                                                      (settings.json, local catalog, built-in content), which
+                                                      Unity Cloud Build restores instead of building Addressables
 
 Commands:
     publish   upload an export made by Build Utility > DLC Content > Export Selected Releases
@@ -41,6 +44,10 @@ only does that when the file belongs to the catalog being published), it is stor
 version during step 2. The same file again is skipped; a different file fails the run before anything is written,
 unless --allow-new-catalog is given (a version that hasn't shipped). Content updates never change it: every update
 of a version is built against the file from the full build players have.
+
+App Addressables: when export.json names player-addressables.zip (the exporter packs it when the app's Addressables
+output in Library belongs to the catalog being published), it is stored during step 2, replacing the stored one when
+it differs. Cloud Build's pre-export (DlcPlayerContent.RestoreForCloudBuild) downloads it for the version it builds.
 
 Resuming: run the same publish again. Bundles and catalog files already uploaded are skipped (same MD5), and a
 v<N>/product.json left by the interrupted run (written but not yet listed in products.json) is reused when it
@@ -76,6 +83,7 @@ CONTENT_TYPES = {".json": "application/json", ".hash": "text/plain", ".bin": "ap
                  ".bundle": "application/octet-stream"}
 BASELINE_DIR = "_build-state"
 BASELINE_FILE = "addressables_content_state.bin"
+PLAYER_FILE = "player-addressables.zip"
 RETRY_DELAYS = (3, 10)  # seconds before the 2nd and 3rd attempt of a failed upload; tests set these to 0
 PUBLISH_STEPS = 4
 
@@ -472,6 +480,25 @@ def baseline_name(platform, app_version):
     return f"{BASELINE_DIR}/{platform}/{app_version}/{BASELINE_FILE}"
 
 
+def player_name(platform, app_version):
+    return f"{BASELINE_DIR}/{platform}/{app_version}/{PLAYER_FILE}"
+
+
+def plan_player(store, run, staging, export, platform, app_version):
+    """(blob name, local path) of the app's Addressables package to upload in step 2, or None."""
+    name = player_name(platform, app_version)
+    local = export.get("playerContentFile")
+    if not local:
+        if store.md5(name) is None:
+            run.warn(f"No app Addressables are stored for {platform} {app_version} and this export has none (see the "
+                     "exporter's warning). Cloud Build can't build this app version until a publish stores them.")
+        return None
+    path = Path(local) if Path(local).is_absolute() else staging / local
+    if not path.is_file():
+        raise PublishError(f"{path} named in export.json is missing. Export again.")
+    return name, path
+
+
 def plan_baseline(store, run, export, platform, app_version, allow_new_catalog):
     """(blob name, local path, overwrite) to upload in step 2, or None. Checked before anything is written."""
     name = baseline_name(platform, app_version)
@@ -520,6 +547,7 @@ def publish(store, run, staging, only, allow_new_catalog=False):
     build, catalog, hash_file, bundles = check_build(export)
     check_catalog_name(store, run, prefix, catalog.name, allow_new_catalog)
     baseline = plan_baseline(store, run, export, platform, app_version, allow_new_catalog)
+    player = plan_player(store, run, staging, export, platform, app_version)
     products = load_products(staging, export, only)
     index, etag = load_index(store, prefix, platform, app_version)
 
@@ -556,6 +584,8 @@ def publish(store, run, staging, only, allow_new_catalog=False):
     if baseline:
         name, path, overwrite = baseline
         upload_files(store, run, 2, "Catalog", [(name, path)], "no-store", create_only=not overwrite, keep_going=False)
+    if player:
+        upload_files(store, run, 2, "Catalog", [player], "no-store", create_only=False, keep_going=False)
 
     run.say("\n3. Product manifests")
     for i, (doc, entry, number, resumed) in enumerate(plan):
@@ -779,6 +809,7 @@ def status(store, run, platform, app_version, state_json=False):
         # One machine-readable line for the Unity window's build suggestion.
         print("@@state " + json.dumps({"catalogs": remote_catalogs(store, prefix),
                                        "baseline": store.md5(baseline_name(platform, app_version)) is not None,
+                                       "player": store.md5(player_name(platform, app_version)) is not None,
                                        "products": len(index["products"])}), flush=True)
     if etag is None:
         run.say(f"No {prefix}products.json yet.")

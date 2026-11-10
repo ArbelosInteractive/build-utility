@@ -60,7 +60,7 @@ class PublishTests(unittest.TestCase):
     def tearDown(self):
         shutil.rmtree(self.tmp, ignore_errors=True)
 
-    def export(self, products, content_state=None):
+    def export(self, products, content_state=None, player=None):
         stage = self.tmp / f"stage{len(list(self.tmp.glob('stage*')))}"
         stage.mkdir()
         export = {
@@ -71,6 +71,9 @@ class PublishTests(unittest.TestCase):
             state = self.tmp / f"state{len(list(self.tmp.glob('state*')))}.bin"
             state.write_bytes(content_state)
             export["contentStateFile"] = str(state)
+        if player is not None:
+            (stage / "player-addressables.zip").write_bytes(player)
+            export["playerContentFile"] = "player-addressables.zip"
         (stage / "export.json").write_text(json.dumps(export))
         for pid, keys in products.items():
             (stage / pid).mkdir()
@@ -406,9 +409,41 @@ class PublishTests(unittest.TestCase):
                 self.assertEqual(0, self.run_cmd(*base))
             line = next(l for l in out.getvalue().splitlines() if l.startswith("@@state "))
             return json.loads(line[len("@@state "):])
-        self.assertEqual({"catalogs": [], "baseline": False, "products": 0}, state())
-        self.run_cmd("publish", "--staging", str(self.export({"a": ["A/1"]}, b"state-1")))
-        self.assertEqual({"catalogs": ["catalog_1.bin"], "baseline": True, "products": 1}, state())
+        self.assertEqual({"catalogs": [], "baseline": False, "player": False, "products": 0}, state())
+        self.run_cmd("publish", "--staging", str(self.export({"a": ["A/1"]}, b"state-1", b"zip-1")))
+        self.assertEqual({"catalogs": ["catalog_1.bin"], "baseline": True, "player": True, "products": 1}, state())
+
+    PLAYER = "_build-state/Android/1.4.0/player-addressables.zip"
+
+    def test_player_package_is_stored_and_replaced(self):
+        self.assertEqual(0, self.run_cmd("publish", "--staging", str(self.export({"a": ["A/1"]}, b"state-1", b"zip-1"))))
+        self.assertEqual(b"zip-1", self.store.blobs[self.PLAYER][0])
+        w = self.store.writes
+        self.assertLess(w.index("Android/1.4.0/catalog_1.hash"), w.index(self.PLAYER))
+        self.assertLess(w.index(self.PLAYER), w.index("Android/1.4.0/a/v1/product.json"))
+
+        self.store.writes.clear()
+        self.assertEqual(0, self.run_cmd("publish", "--staging", str(self.export({"a": ["A/1", "A/2"]}, b"state-1", b"zip-1"))))
+        self.assertNotIn(self.PLAYER, self.store.writes)  # identical: skipped
+
+        self.assertEqual(0, self.run_cmd("publish", "--staging", str(self.export({"a": ["A/1", "A/3"]}, b"state-1", b"zip-2"))))
+        self.assertEqual(b"zip-2", self.store.blobs[self.PLAYER][0])
+
+    def test_missing_player_package_warns_only_when_none_stored(self):
+        run = p.Run(self.tmp / "logs" / "a.log", dry_run=False)
+        p.publish(self.store, run, self.export({"a": ["A/1"]}), None)
+        run.summary(True)
+        self.assertTrue(any("No app Addressables" in w for w in run.warnings))
+
+        self.store.blobs[self.PLAYER] = (b"zip-1", "e1")
+        run = p.Run(self.tmp / "logs" / "b.log", dry_run=False)
+        p.publish(self.store, run, self.export({"a": ["A/1", "A/2"]}), None)
+        run.summary(True)
+        self.assertFalse(any("No app Addressables" in w for w in run.warnings))
+
+    def test_player_package_dry_run_writes_nothing(self):
+        self.assertEqual(0, self.run_cmd("publish", "--staging", str(self.export({"a": ["A/1"]}, None, b"zip-1")), "--dry-run"))
+        self.assertEqual([], self.store.writes)
 
 if __name__ == "__main__":
     unittest.main()

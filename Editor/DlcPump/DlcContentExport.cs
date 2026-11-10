@@ -24,6 +24,8 @@ public sealed class DlcContentExportResult
     public string platform, appVersion, profileName, remoteLoadPath, buildPath, catalogFile, hashFile, catalogBuild;
     /// <summary>The full build's addressables_content_state.bin, when it belongs to <see cref="catalogFile"/>; publish stores it once per platform and app version.</summary>
     public string contentStateFile;
+    /// <summary>The app's Addressables output (<see cref="DlcPlayerContent"/>) belongs to <see cref="catalogFile"/>, so the export packs it for Cloud Build.</summary>
+    public bool playerContent;
     public List<string> releaseIds = new List<string>();
     public List<DlcContentProductDraft> products = new List<DlcContentProductDraft>();
     public List<string> errors = new List<string>(), warnings = new List<string>();
@@ -40,6 +42,7 @@ public sealed class DlcContentExportResult
         sb.AppendLine($"DLC content export for {platform} {appVersion} (profile '{profileName}')");
         sb.AppendLine($"Products: {products.Count}, keys: {products.Sum(p => p.keys.Count)}, catalog: {catalogFile} ({catalogBuild})");
         if (contentStateFile != null) sb.AppendLine("Content-state baseline: " + contentStateFile);
+        if (playerContent) sb.AppendLine($"App Addressables for Cloud Build: {DlcPlayerContent.BuildPath} (stored as {DlcPlayerContent.FileName})");
         if (ignoredEntries > 0) sb.AppendLine($"Ignored {ignoredEntries} content entr{(ignoredEntries == 1 ? "y" : "ies")} with a blank Addressables key (local content).");
         if (localOnlyProducts.Count > 0) sb.AppendLine($"{localOnlyProducts.Count} product(s) have no Addressables keys and are published with an empty key list (nothing to download): " + string.Join(", ", localOnlyProducts));
         foreach (var e in errors) sb.AppendLine("ERROR: " + e);
@@ -72,6 +75,7 @@ public static class DlcContentExport
 
         ResolveEnvironment(releases, publishing, settings, r);
         ResolveContentState(settings, r);
+        ResolvePlayerContent(r);
         var known = KnownAddresses(settings);
         HashSet<string> catalogKeys = null;
         if (r.catalogFile != null)
@@ -239,6 +243,19 @@ public static class DlcContentExport
         r.contentStateFile = path;
     }
 
+    /// <summary>
+    /// Includes the app's Addressables output (Library/com.unity.addressables/aa/&lt;Platform&gt;) when it belongs to the
+    /// exported catalog. Publish stores it for Cloud Build, which ships it instead of building Addressables.
+    /// </summary>
+    static void ResolvePlayerContent(DlcContentExportResult r)
+    {
+        if (r.catalogFile == null) return;
+        string problem = DlcPlayerContent.Check(DlcPlayerContent.BuildPath, r.catalogFile);
+        if (problem != null)
+            r.warnings.Add(problem + $" The app's Addressables won't be stored, so Cloud Build can't build {r.platform} {r.appVersion} until a publish stores them.");
+        else r.playerContent = true;
+    }
+
     static HashSet<string> KnownAddresses(AddressableAssetSettings settings)
     {
         var entries = new List<AddressableAssetEntry>();
@@ -300,9 +317,12 @@ public static class DlcContentExport
             ["remoteLoadPath"] = r.remoteLoadPath, ["addressablesBuildPath"] = r.buildPath,
             ["catalogFile"] = r.catalogFile, ["hashFile"] = r.hashFile, ["catalogBuild"] = r.catalogBuild,
             ["contentStateFile"] = r.contentStateFile,
+            ["playerContentFile"] = r.playerContent ? DlcPlayerContent.FileName : null,
             ["exportedUtc"] = DateTime.UtcNow.ToString("o"), ["releases"] = new JArray(r.releaseIds),
             ["products"] = new JArray(r.products.Select(p => p.productId)),
             ["localOnlyProducts"] = new JArray(r.localOnlyProducts), ["ignoredLocalEntries"] = r.ignoredEntries };
+        if (r.playerContent)
+            DlcPlayerContent.Write(Path.Combine(dir, DlcPlayerContent.FileName), DlcPlayerContent.BuildPath, r.platform, r.appVersion, r.catalogFile, r.catalogBuild, r.buildPath);
         DlcReleaseService.WriteNew(Path.Combine(dir, "export.json"), export.ToString(Formatting.Indented));
         DlcReleaseService.WriteNew(Path.Combine(dir, "validation.json"),
             new JObject { ["errors"] = new JArray(r.errors), ["warnings"] = new JArray(r.warnings) }.ToString(Formatting.Indented));
