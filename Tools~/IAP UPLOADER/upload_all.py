@@ -16,6 +16,7 @@ Usage:  python upload_all.py --dry-run
         python upload_all.py
         python upload_all.py --only google playfab
         python upload_all.py --activate --publish
+        python upload_all.py --listed-regions-only     (Apple/Google: only the exported territories and regions)
         python upload_all.py --only playfab --publish                          (PlayFab staging title, the default)
         python upload_all.py --only playfab --playfab-target production --publish
 
@@ -118,12 +119,16 @@ def command(platform, cfg, args, log_path):
         cmd += ["--root", str(cfg["apple_root"])]
         if args.items.get("apple"):
             cmd += ["--products", *args.items["apple"]]
+        if args.listed_regions_only:
+            cmd.append("--listed-territories-only")
     elif platform == "google":
         cmd += ["--input", str(cfg["google_input"])]
         if args.items.get("google"):
             cmd += ["--only", *args.items["google"]]
         if args.activate:
             cmd.append("--activate")
+        if args.listed_regions_only:
+            cmd.append("--listed-regions-only")
     else:
         cmd += ["--input", str(cfg["playfab_input"])]
         if args.items.get("playfab"):
@@ -193,6 +198,9 @@ def main():
         ap.add_argument(f"--{name}-item", nargs="+", metavar="ID",
                         help=f"like --item, but just for {name}; can be combined across platforms")
     ap.add_argument("--activate", action="store_true", help="Google: make purchase options active")
+    ap.add_argument("--listed-regions-only", action="store_true",
+                    help="Apple and Google: make products available only in the exported territories/regions, "
+                         "instead of everywhere (Google prices are converted from the US price; Apple's from its base territory)")
     ap.add_argument("--publish", action="store_true", help="PlayFab: publish items instead of leaving drafts")
     ap.add_argument("--playfab-target", choices=sorted(PLAYFAB_TARGETS), default="staging",
                     help="PlayFab title to upload to (default: staging)")

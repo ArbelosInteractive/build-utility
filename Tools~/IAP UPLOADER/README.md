@@ -164,6 +164,7 @@ python upload_all.py
 | `--item ID ...` | upload only these items; use with exactly one platform in `--only`. Apple: folder names (`0001`), Google: product IDs, PlayFab: FriendlyIds. Example: `python upload_all.py --only apple --item 0001 0002` |
 | `--only apple google playfab` | run only the platforms you list (they still run in Apple, Google, PlayFab order) |
 | `--activate` | Google: make the purchase options active, i.e. purchasable (otherwise they stay as drafts) |
+| `--listed-regions-only` | Apple and Google: make products available only in the exported territories and regions. By default they're available everywhere, including territories and regions added later: Google prices are converted from each product's US price (Google's suggested local prices; listed regions keep their price), and Apple sets every territory's price from the base territory's price |
 | `--publish` | PlayFab: publish the items (otherwise they stay as drafts) |
 | `--config path` | use a different config file |
 | `--export folder` | use `<folder>/apple`, `<folder>/google` and `<folder>/playfab` instead of the config's paths (with `--vault NAME` and `--log-dir DIR`, no config file is needed) |
@@ -223,7 +224,7 @@ python upload_google_iap.py --input .\google --only wrestler_jazz
 python upload_google_iap.py --input .\google
 python upload_google_iap.py --input .\google --activate
 ```
-Options: `--input` (batch file or folder), `--vault`, `--only product_id ...`, `--activate`, `--batch-size N` (products per call, default 100; use `1` to find which product a failure comes from).
+Options: `--input` (batch file or folder), `--vault`, `--only product_id ...`, `--activate`, `--listed-regions-only` (skip the conversion to all regions; otherwise every product needs a US price in USD), `--batch-size N` (products per call, default 100; use `1` to find which product a failure comes from).
 
 The service account JSON is read from the `google-service-account` secret. The script prints the service account and cloud project it is using at the start of each run.
 

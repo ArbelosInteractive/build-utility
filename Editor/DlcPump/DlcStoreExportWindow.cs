@@ -23,7 +23,7 @@ public sealed class DlcStoreExportWindow : EditorWindow
     [SerializeField] string exportId = "";
     [SerializeField] string report = "";
     [SerializeField] string uploadExport = "";
-    [SerializeField] bool showUploadSettings, activateGoogle, publishPlayFab;
+    [SerializeField] bool showUploadSettings, activateGoogle, publishPlayFab, listedRegionsOnly;
     [SerializeField] List<bool> platformFoldouts = new List<bool> { true, true, true };
     [SerializeField] DlcWaveSchedule waveSchedule;
     [SerializeField] List<string> selectedWaveIds = new List<string>();
@@ -428,6 +428,11 @@ public sealed class DlcStoreExportWindow : EditorWindow
 
         activateGoogle = EditorGUILayout.ToggleLeft(new GUIContent("Google Play: make purchase options active (--activate)",
             "Off: purchase options are left inactive and can be activated in Play Console."), activateGoogle);
+        listedRegionsOnly = !EditorGUILayout.ToggleLeft(new GUIContent("Apple and Google Play: sell in every country, priced from the US price",
+            "On: products are made available in every App Store territory and Google Play region, including ones added later.\n" +
+            "Google Play: the US price is converted to each region (Google's suggested local prices, as in Play Console); regions listed in " +
+            "the product's Google regions keep their price.\nApple: Apple sets every territory's price from the base territory's price.\n" +
+            "Off: only the exported Apple territories and Google regions (--listed-regions-only). Players elsewhere can't see or buy the product."), !listedRegionsOnly);
         publishPlayFab = EditorGUILayout.ToggleLeft(new GUIContent("PlayFab: publish the items (--publish)",
             "Off: items are created or updated as drafts, to check in Game Manager. " +
             "The game only sees published items, so publish on staging to test them in a staging build."), publishPlayFab);
@@ -655,6 +660,8 @@ public sealed class DlcStoreExportWindow : EditorWindow
             if (!EditorUtility.DisplayDialog("Upload to the stores",
                     $"Upload from\n{Path.GetFileName(uploadExport)}\n\n{summary}\n\n" +
                     (selection.ContainsKey("google") ? $"Google purchase options: {(activateGoogle ? "ACTIVE" : "left inactive")}\n" : "") +
+                    (selection.ContainsKey("google") || selection.ContainsKey("apple")
+                        ? $"Countries: {(listedRegionsOnly ? "only the exported territories/regions" : "all, priced from the US price")}\n" : "") +
                     (selection.ContainsKey("playfab") ? $"PlayFab items: {(publishPlayFab ? "PUBLISHED" : "drafts")} on the " +
                         (playFabProduction ? $"PRODUCTION title {productionTitle}" : $"staging title {stagingTitle}") +
                         (playFabProduction && skipStagingCheck ? " (staging check SKIPPED)" : "") +
@@ -686,7 +693,8 @@ public sealed class DlcStoreExportWindow : EditorWindow
                 l => { lock (live) { liveTail.Enqueue(l); while (liveTail.Count > 200) liveTail.Dequeue(); liveDirty = true; } },
                 (p, state) => { lock (live) { livePlatforms.Add((p, state)); liveDirty = true; } },
                 (p, name, status) => { lock (live) { liveItems.Add((p, name, status)); liveDirty = true; } },
-                cancelSource.Token, playFabProduction, skipStagingCheck, settings.PlayFabIconFolderFullPath(), allowUnpublishedChanges);
+                cancelSource.Token, playFabProduction, skipStagingCheck, settings.PlayFabIconFolderFullPath(), allowUnpublishedChanges,
+                listedRegionsOnly);
             Update(); // apply the last statuses
             uploading = false;
             foreach (string p in selection.Keys)

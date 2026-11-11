@@ -28,11 +28,18 @@ Safe to run again. For each product:
 The first real error stops the run. A summary of created / updated items is printed and
 written to a log file (logs\apple_<date>_<time>.log, or --log-file).
 
+All territories: each product is made available in every territory Apple supports (read from
+/v1/territories) and in territories Apple adds later, whatever 04-availability.json lists. Prices
+need nothing extra: the price schedule sets only the base territory's price, and Apple sets every
+other territory's price from it (its equalized prices). --listed-territories-only sends the
+availability file as exported.
+
 Credentials: read from Azure Key Vault (secrets apple-key-id, apple-issuer-id, apple-p8).
              The vault name comes from upload_config.json or --vault; sign in with `az login`.
 Install:     pip install requests "pyjwt[crypto]" azure-identity azure-keyvault-secrets
 Usage:       python upload_apple_iap.py --root .\apple --dry-run
              python upload_apple_iap.py --root .\apple --products 0001
+             python upload_apple_iap.py --root .\apple --listed-territories-only
 """
 import argparse
 import hashlib
@@ -168,6 +175,21 @@ def find_price_point(client, iap_id, spec):
                        "it must be one of Apple's price tiers")
 
 
+def all_territories(client, cache):
+    """Every App Store territory ID (e.g. USA, GBR), read once per run."""
+    if "territories" not in cache:
+        cache["territories"] = sorted(t["id"] for t in paged(client, "/v1/territories", {"limit": 200}))
+        print(f"  {len(cache['territories'])} App Store territories")
+    return cache["territories"]
+
+
+def expand_availability(data, territories):
+    """Make the product available in every territory, and in territories Apple adds later."""
+    data.setdefault("attributes", {})["availableInNewTerritories"] = True
+    data.setdefault("relationships", {})["availableTerritories"] = {
+        "data": [{"type": "territories", "id": t} for t in territories]}
+
+
 def md5(path):
     return hashlib.md5(path.read_bytes()).hexdigest()
 
@@ -296,6 +318,12 @@ def process_product(client, folder, args, app_cache, info):
         data = body["data"]
         dtype, is_patch = data["type"], "id" in data
 
+        if dtype == "inAppPurchaseAvailabilities" and not is_patch and not args.listed_territories_only:
+            if args.dry_run:
+                print(f"{label}: would make the product available in every App Store territory, and new ones")
+                continue
+            expand_availability(data, all_territories(client, app_cache))
+
         if dtype == SCREENSHOT and info["skip_shot"]:
             print(f"{label}: skipped (existing screenshot kept)")
             continue
@@ -389,6 +417,8 @@ def main():
     ap.add_argument("--products", nargs="*", help="only these folders, e.g. 0001 0002")
     ap.add_argument("--vault", help="Azure Key Vault name (default: keyvault_name in upload_config.json)")
     ap.add_argument("--log-file", type=Path, help="append to this log file instead of starting a new one")
+    ap.add_argument("--listed-territories-only", action="store_true",
+                    help="send 04-availability.json as exported, instead of every territory")
     ap.add_argument("--dry-run", action="store_true", help="print what would be sent, call nothing")
     ap.add_argument("-v", "--verbose", action="store_true", help="print payloads in dry-run")
     args = ap.parse_args()

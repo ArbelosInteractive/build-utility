@@ -97,7 +97,8 @@ public static class DlcStoreUploader
     public static Task<(int code, string output)> Upload(string python, string export, string vault,
         IDictionary<string, List<string>> items, bool dryRun, bool activateGoogle, bool publishPlayFab,
         Action<string> onLine, Action<string, string> onPlatform, Action<string, string, string> onItem, CancellationToken cancel,
-        bool playFabProduction = false, bool skipStagingCheck = false, string iconFolder = null, bool allowUnpublishedChanges = false)
+        bool playFabProduction = false, bool skipStagingCheck = false, string iconFolder = null, bool allowUnpublishedChanges = false,
+        bool listedRegionsOnly = false)
     {
         var platforms = Platforms.Where(items.ContainsKey).ToList();
         var args = new List<string> { Script, "--export", export, "--vault", vault ?? "", "--log-dir", LogDir, "--progress", "--only" };
@@ -106,6 +107,7 @@ public static class DlcStoreUploader
             if (items[p] != null && items[p].Count > 0) { args.Add($"--{p}-item"); args.AddRange(items[p]); }
         if (dryRun) args.Add("--dry-run");
         if (activateGoogle && platforms.Contains("google")) args.Add("--activate");
+        if (listedRegionsOnly && (platforms.Contains("google") || platforms.Contains("apple"))) args.Add("--listed-regions-only");
         if (publishPlayFab && platforms.Contains("playfab")) args.Add("--publish");
         if (platforms.Contains("playfab"))
         {

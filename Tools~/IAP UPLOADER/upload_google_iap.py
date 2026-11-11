@@ -23,6 +23,12 @@ Usage:       python upload_google_iap.py --input .\google --dry-run
              python upload_google_iap.py --input .\google --only wrestler_jazz --batch-size 1
 
 Without --activate, purchase options are left as drafts (not purchasable).
+
+All regions: before uploading, each purchase option's US price is converted to every region Google
+Play supports (Google's pricing:convertRegionPrices, the same suggestions Play Console makes), and
+every region is made AVAILABLE. Regions already listed in the file keep their own price. Regions
+Google adds later become available too (newRegionsConfig). --listed-regions-only turns this off
+and uploads just the regions in the file.
 """
 import argparse
 import json
@@ -78,7 +84,7 @@ def load_requests(target):
     return found
 
 
-def validate(req):
+def validate(req, all_regions=False):
     errs = []
     prod = req.get("oneTimeProduct") or {}
     pid = prod.get("productId")
@@ -114,7 +120,46 @@ def validate(req):
         if not oid or not OPTION_ID.match(oid):
             errs.append(f"invalid purchaseOptionId {oid!r} (lowercase letters, digits and "
                         "hyphens only, max 63 characters)")
+        if all_regions and not base_price(opt):
+            errs.append(f"purchase option {oid!r} has no US price in USD to convert to the other "
+                        "regions (add a US region, or use --listed-regions-only)")
     return errs
+
+
+def base_price(option):
+    """The US price in USD that the other regions are converted from, or None."""
+    for cfg in option.get("regionalPricingAndAvailabilityConfigs") or []:
+        price = cfg.get("price") or {}
+        if cfg.get("regionCode") == "US" and price.get("currencyCode") == "USD":
+            return price
+    return None
+
+
+def price_key(price):
+    return (price.get("currencyCode"), int(price.get("units", 0)), int(price.get("nanos", 0)))
+
+
+def expand_regions(req, converted):
+    """Make every region AVAILABLE, priced from Google's conversion of the option's US price.
+    Regions already in the request keep their price. `converted` maps a price_key to the
+    convertRegionPrices response for that price. Returns the number of regions added."""
+    added = 0
+    for opt in req["oneTimeProduct"].get("purchaseOptions", []):
+        conv = converted[price_key(base_price(opt))]
+        configs = opt.setdefault("regionalPricingAndAvailabilityConfigs", [])
+        listed = {c.get("regionCode") for c in configs}
+        for code, region in sorted((conv.get("convertedRegionPrices") or {}).items()):
+            if code not in listed:
+                configs.append({"regionCode": code, "price": region["price"], "availability": "AVAILABLE"})
+                added += 1
+        other = conv.get("convertedOtherRegionsPrice") or {}
+        if other.get("usdPrice") and other.get("eurPrice"):
+            opt["newRegionsConfig"] = {"usdPrice": other["usdPrice"], "eurPrice": other["eurPrice"],
+                                       "availability": "AVAILABLE"}
+    version = (next(iter(converted.values()), {}).get("regionVersion") or {}).get("version")
+    if version:
+        req["regionsVersion"] = {"version": version}
+    return added
 
 
 def money(price):
@@ -177,6 +222,17 @@ def existing_product_ids(session, package):
             return ids
 
 
+def convert_prices(session, package, prices):
+    """convertRegionPrices for each distinct price (one call per price, not per product)."""
+    converted = {}
+    for price in prices:
+        key = price_key(price)
+        if key not in converted:
+            converted[key] = post(session, f"{API}/{package}/pricing:convertRegionPrices", {"price": price})
+            print(f"  converted {money(price)} to {len(converted[key].get('convertedRegionPrices') or {})} regions")
+    return converted
+
+
 def chunks(items, size):
     for i in range(0, len(items), size):
         yield items[i:i + size]
@@ -216,8 +272,11 @@ def main():
                     help="make the purchase options ACTIVE (purchasable) after uploading")
     ap.add_argument("--batch-size", type=int, default=MAX_BATCH, metavar="N",
                     help=f"products per API call, 1-{MAX_BATCH} (use 1 to pinpoint a failing product)")
+    ap.add_argument("--listed-regions-only", action="store_true",
+                    help="upload just the regions in the file, instead of every region priced from the US price")
     ap.add_argument("--dry-run", action="store_true", help="validate and print, call nothing")
     args = ap.parse_args()
+    all_regions = not args.listed_regions_only
     args.batch_size = max(1, min(args.batch_size, MAX_BATCH))
     setup_logging("google", args.log_file)
 
@@ -230,7 +289,7 @@ def main():
         pid = (req.get("oneTimeProduct") or {}).get("productId")
         if args.only and pid not in args.only:
             continue
-        errs = validate(req)
+        errs = validate(req, all_regions)
         pkg = (req.get("oneTimeProduct") or {}).get("packageName")
         key = (pkg, pid)
         if pid and key in seen:
@@ -255,6 +314,9 @@ def main():
             print(f"== {pkg}: {len(items)} product(s), {len(list(chunks(items, args.batch_size)))} call(s)")
             for _, req in items:
                 print(f"  {summarize(req)}")
+        if all_regions:
+            print("\nAll regions: each US price would be converted to every other Google Play region "
+                  "(listed regions keep their price), and every region made available.")
         print("\nDry run: validation passed, nothing was sent.")
         return
 
@@ -280,6 +342,15 @@ def main():
             existing = existing_product_ids(session, pkg)
         except ApiError as e:
             fail(f"could not list the existing products of {pkg}: {e}")
+        if all_regions:
+            try:
+                converted = convert_prices(session, pkg, [base_price(o) for _, r in items
+                                                          for o in r["oneTimeProduct"]["purchaseOptions"]])
+            except ApiError as e:
+                fail(f"could not convert the US prices to the other regions: {e}")
+            for _, req in items:
+                added = expand_regions(req, converted)
+                print(f"  {req['oneTimeProduct']['productId']}: {added} more region(s) priced from the US price")
         uploaded = []
         for chunk in chunks(items, args.batch_size):
             names = ", ".join(r["oneTimeProduct"]["productId"] for _, r in chunk)
