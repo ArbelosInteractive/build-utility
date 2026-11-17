@@ -237,6 +237,14 @@ python upload_playfab_items.py --input .\playfab --publish
 ```
 Options: `--input` (file or folder; every `.json` in it, including subfolders, is read, so keep other JSON out), `--vault`, `--only friendly_id ...`, `--publish`.
 
+### Live check: `check_live.py` (read-only)
+
+Answers "is this product live everywhere?" for each product: Google Play (purchase option ACTIVE, regions available), App Store Connect (state, territories), both PlayFab titles (published, inside its start/end window, not hidden; n/a for consumables), `products.json` in the staging and production DLC containers for each platform, and the game data (`data/<appVersion>/IAPProductCatalog.json`, or built into the app). Each cell is OK, WARN or FAIL; a product is *live for players* when every production cell is OK. It writes nothing. In Unity: DLC Publish → **Live check**.
+
+```
+python check_live.py --vault tsw-iap --catalog Assets/Resources/IAPProductCatalog.json --apple-app-id <id> --google-package <package> --app-version <version> --staging-url https://<cdn>/dlc-staging --production-url https://<cdn>/dlc-production [--product id ...]
+```
+
 ---
 
 ## 7. What happens when an item already exists

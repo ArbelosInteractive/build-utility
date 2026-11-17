@@ -54,6 +54,17 @@ public sealed class DlcPublishWindow : EditorWindow
     bool allowNewCatalog; // deliberately not serialized: off again after a reload
     string azureStatus = "Azure: not checked yet";
 
+    // Results of the newest live check (read-only); rows arrive from the script's background thread.
+    readonly List<DlcLiveCheck.Row> liveRows = new List<DlcLiveCheck.Row>();
+    bool showLive = true;
+
+    /// <summary>Publish and promote also publish / promote the game data (IAP catalog and the project's extra files).</summary>
+    bool WithGameData
+    {
+        get => EditorPrefs.GetBool(PrefKey("withGameData"), true);
+        set => EditorPrefs.SetBool(PrefKey("withGameData"), value);
+    }
+
     // What's published for the current platform and app version, for the build suggestion.
     DlcContentPublisher.RemoteVersionState remote;
     string remoteError, remoteKey;
@@ -138,6 +149,8 @@ public sealed class DlcPublishWindow : EditorWindow
             DrawExport();
             EditorGUILayout.Space();
             DrawPublish();
+            EditorGUILayout.Space();
+            DrawLiveCheck();
             EditorGUILayout.Space();
             DrawPromote();
             EditorGUILayout.Space();
@@ -523,6 +536,8 @@ public sealed class DlcPublishWindow : EditorWindow
             if (allowNewCatalog)
                 EditorGUILayout.HelpBox("Installed players of this version won't see content published with a new catalog name. Untick after this publish.", MessageType.Warning);
         }
+        WithGameData = EditorGUILayout.ToggleLeft(new GUIContent("Also publish game data (IAP catalog, arenas) to staging",
+            "After the content, uploads the same files as 'Publish game data to staging' below. Unchanged files are skipped."), WithGameData);
         using (new EditorGUILayout.HorizontalScope())
         {
             using (new EditorGUI.DisabledScope(exports.Count == 0))
@@ -548,6 +563,8 @@ public sealed class DlcPublishWindow : EditorWindow
         promoteAllowNewCatalog = EditorGUILayout.ToggleLeft(new GUIContent(
             $"{DlcContentPublisher.CurrentAppVersion} hasn't shipped yet: allow a new catalog name in production",
             "Like the publish option: only for an app version players don't have yet."), promoteAllowNewCatalog);
+        WithGameData = EditorGUILayout.ToggleLeft(new GUIContent("Also promote game data (IAP catalog, arenas) to production",
+            "After products.json, copies staging's game data to production, so the store sells what you just promoted."), WithGameData);
         using (new EditorGUILayout.HorizontalScope())
         {
             if (GUILayout.Button("Promote dry run")) StartPromote(true);
@@ -612,16 +629,20 @@ public sealed class DlcPublishWindow : EditorWindow
             if (products.Count == 0) { report = "Check the releases to promote, or untick 'Only products of the checked releases' to promote every staged product."; return; }
         }
         string what = products == null ? "every product published to staging" : $"{products.Count} product(s): {string.Join(", ", products.Take(8))}{(products.Count > 8 ? ", …" : "")}";
-        bool allowNew = promoteAllowNewCatalog;
+        bool allowNew = promoteAllowNewCatalog, withData = WithGameData;
         if (!dryRun && !EditorUtility.DisplayDialog("Promote DLC content to PRODUCTION",
                 $"Copy {what}\n\nfrom\n{DlcContentPublisher.Destination(settings)}\n\nto PRODUCTION\n{DlcContentPublisher.ProductionDestination(settings)}\n\n" +
+                (withData ? $"Then copy the game data (IAP catalog, arenas) to\n{DlcContentPublisher.ProductionDataDestination(settings)}\n\n" : "") +
                 "Players of this app version see it as soon as products.json is written. Did you test it with a staging build?" +
                 (allowNew ? "\n\nA new catalog name is ALLOWED in production. Only do this if the version hasn't shipped." : ""),
                 "Promote to production", "Cancel"))
             return;
         if (!dryRun) promoteAllowNewCatalog = false;
         Execute(dryRun ? "promote dry run" : "promote",
-            (line, progress, cancel) => DlcContentPublisher.Promote(settings, products, dryRun, allowNew, line, progress, cancel));
+            (line, progress, cancel) => withData
+                ? ThenGameData(DlcContentPublisher.Promote(settings, products, dryRun, allowNew, line, progress, cancel),
+                    () => DlcContentPublisher.PromoteData(settings, dryRun, line, progress, cancel))
+                : DlcContentPublisher.Promote(settings, products, dryRun, allowNew, line, progress, cancel));
     }
 
     void DrawResume()
@@ -699,14 +720,86 @@ public sealed class DlcPublishWindow : EditorWindow
         RunPublish(folder, products, dryRun, allowNew, what);
     }
 
+    // Runs the content step, then (only if it succeeded) the game data step; one report with both outputs.
+    static async System.Threading.Tasks.Task<(int code, string output)> ThenGameData(
+        System.Threading.Tasks.Task<(int code, string output)> content, Func<System.Threading.Tasks.Task<(int code, string output)>> data)
+    {
+        var first = await content;
+        if (first.code != 0) return (first.code, first.output + "\n\nGame data skipped: the content step failed.");
+        var second = await data();
+        return (second.code, first.output + "\n\n──────── Game data ────────\n" + second.output);
+    }
+
+    void DrawLiveCheck()
+    {
+        showLive = EditorGUILayout.Foldout(showLive, "Live check (read-only)", true);
+        if (!showLive) return;
+        EditorGUILayout.HelpBox(
+            $"For each product: Google Play, App Store Connect, both PlayFab titles, both containers' products.json (all platforms) and " +
+            $"the game data for {DlcContentPublisher.CurrentAppVersion}. Changes nothing. Hover a cell for the detail. 'Live' means every " +
+            "production check is OK. Run it before promoting (staging columns should be green) and after (production columns).", MessageType.None);
+        using (new EditorGUILayout.HorizontalScope())
+        {
+            if (GUILayout.Button("Check the checked releases")) StartLiveCheck(true);
+            if (GUILayout.Button("Check every product")) StartLiveCheck(false);
+        }
+        List<DlcLiveCheck.Row> rows;
+        lock (liveRows) rows = liveRows.ToList();
+        if (rows.Count == 0) return;
+        EditorGUILayout.LabelField($"{rows.Count(r => r.live)} of {rows.Count} live for players  ·  " +
+            $"{rows.Count(r => r.Any("FAIL"))} with a FAIL  ·  {rows.Count(r => !r.Any("FAIL") && r.Any("WARN"))} with only warnings", EditorStyles.miniLabel);
+        DlcLiveCheck.DrawTable(rows, position.width - 40);
+    }
+
+    void StartLiveCheck(bool onlyChecked)
+    {
+        var inputs = DlcLiveCheck.Gather();
+        if (inputs.error != null) { report = "Live check: " + inputs.error; return; }
+        List<string> products = null;
+        if (onlyChecked)
+        {
+            products = Checked().SelectMany(r => r.productIds ?? new List<string>()).Select(id => (id ?? "").Trim())
+                .Where(id => id.Length > 0).Distinct().ToList();
+            if (products.Count == 0) { report = "Check some releases first, or use 'Check every product'."; return; }
+        }
+        lock (liveRows) liveRows.Clear();
+        Execute("live check",
+            (line, progress, cancel) => DlcLiveCheck.Run(inputs, products, row =>
+            {
+                lock (liveRows) liveRows.Add(row);
+                lock (live) liveDirty = true;
+            }, line, cancel),
+            code =>
+            {
+                List<DlcLiveCheck.Row> rows;
+                lock (liveRows) rows = liveRows.ToList();
+                string problems = DlcLiveCheck.Describe(rows);
+                report = $"{rows.Count(r => r.live)} of {rows.Count} product(s) live for players." +
+                         (problems.Length > 0 ? "\n\n" + problems : "") + "\n\n──────── Output ────────\n" + report;
+            });
+    }
+
     void RunPublish(string folder, List<string> products, bool dryRun, bool allowNew, string what)
     {
+        List<string> dataFiles = null;
+        if (WithGameData)
+        {
+            dataFiles = DlcContentPublisher.PrepareGameData(out string dataError);
+            if (dataError != null)
+            {
+                report = "Game data: " + dataError + "\nFix it, or untick 'Also publish game data' to publish only the content.";
+                return;
+            }
+        }
         if (!dryRun)
             lastPublish = new PublishJob { folder = folder, products = products ?? new List<string>(), hasProducts = products != null,
                 allowNewCatalog = allowNew, what = what, failed = false };
         var job = lastPublish;
         Execute(dryRun ? "publish dry run" : "publish",
-            (line, progress, cancel) => DlcContentPublisher.Publish(settings, folder, products, dryRun, allowNew, line, progress, cancel),
+            (line, progress, cancel) => dataFiles != null
+                ? ThenGameData(DlcContentPublisher.Publish(settings, folder, products, dryRun, allowNew, line, progress, cancel),
+                    () => DlcContentPublisher.PublishData(settings, dataFiles, dryRun, line, progress, cancel))
+                : DlcContentPublisher.Publish(settings, folder, products, dryRun, allowNew, line, progress, cancel),
             code =>
             {
                 if (!dryRun && job != null) job.failed = code != 0;

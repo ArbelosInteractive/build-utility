@@ -134,8 +134,11 @@ public static class DlcContentPublisher
         File.Copy(catalog, target);
         files.Add(target);
 
-        if (adapter is IDlcGameData extra)
-            foreach (var pair in extra.GameDataFiles() ?? new Dictionary<string, string>())
+        IDictionary<string, string> extraFiles = null;
+        try { extraFiles = (adapter as IDlcGameData)?.GameDataFiles(); }
+        catch (Exception e) { error = e.Message; return new List<string>(); }
+        if (extraFiles != null)
+            foreach (var pair in extraFiles)
             {
                 if (string.IsNullOrEmpty(pair.Key) || pair.Key.Any(c => !(char.IsLetterOrDigit(c) || c == '.' || c == '_' || c == '-')) ||
                     files.Any(f => string.Equals(Path.GetFileName(f), pair.Key, StringComparison.OrdinalIgnoreCase)))
