@@ -18,6 +18,16 @@ public static class DlcProject
     public static IDlcProjectAdapter Required => Adapter ?? throw new InvalidOperationException("Register an IDlcProjectAdapter for this project before authoring DLC releases.");
 }
 
+/// <summary>
+/// Optional, on the project adapter: extra game data the Pump publishes next to the IAP catalog
+/// (data/&lt;appVersion&gt;/&lt;file&gt; in the DLC container), which the game downloads with DlcRemoteData.
+/// </summary>
+public interface IDlcGameData
+{
+    /// <summary>File name (letters, digits, '.', '_', '-') to JSON text.</summary>
+    IDictionary<string, string> GameDataFiles();
+}
+
 public interface IDlcPackAuthoring
 {
     string CreatePack(string productId, string title, string description, string[] members);

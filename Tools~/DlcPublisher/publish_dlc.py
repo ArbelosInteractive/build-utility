@@ -20,6 +20,13 @@ Commands:
     check     sign in and confirm the container can be read (writes nothing)
     baseline  download the stored content-state file for a platform and app version
     promote   copy what's published in one container (staging) to another (production), unchanged
+    data-publish  upload game data files (e.g. IAPProductCatalog.json) to data/<appVersion>/, replacing older copies
+    data-promote  copy data/<appVersion>/ from one container (staging) to another (production)
+
+Game data: data/<appVersion>/<file> holds small JSON files the game downloads at startup in place of the copy built
+into the app (Arbelos.BuildUtility.Runtime.DlcRemoteData). They are shared by every platform, mutable (short cache,
+the game revalidates with ETags) and checked to be valid JSON before upload. Promote copies them with data-promote,
+separately from the content, so a data change can go live without a content release and vice versa.
 
 Staging and production: publish to the staging container ("dlc-staging"), test with a staging build, then
 promote to the production container ("dlc-production"). Promote copies the version's bundles, catalog and
@@ -65,6 +72,7 @@ Usage:   python publish_dlc.py publish --staging <export dir> --account-url http
                 --platform Android --app-version 1.4.0 [--product wrestler_jazz] --dry-run
 """
 import argparse
+import codecs
 import datetime
 import hashlib
 import json
@@ -746,6 +754,52 @@ def promote(src, dst, run, platform, app_version, only=None, allow_new_catalog=F
     run.progress(4, "products.json", 1, 1, "files", prefix + "products.json", 1, 1, force=True)
 
 
+# --------------------------------------------------------------------------------------- game data
+
+def data_prefix(app_version):
+    return f"data/{safe_segment(app_version, 'App version')}/"
+
+
+def data_publish(store, run, app_version, files):
+    prefix = data_prefix(app_version)
+    paths = [Path(f) for f in files]
+    for path in paths:
+        safe_segment(path.name, "Data file name")
+        if not path.is_file():
+            raise PublishError(f"{path} doesn't exist.")
+        if path.suffix.lower() == ".json":
+            try:
+                json.loads(path.read_bytes().decode("utf-8-sig"))
+            except Exception as e:
+                raise PublishError(f"{path} isn't valid JSON: {e}")
+    run.say(f"Publishing {len(paths)} data file(s) to {prefix}")
+    run.progress(1, "Game data", 0, len(paths), "files", "", 0, len(paths), force=True)
+    for i, path in enumerate(paths):
+        name = prefix + path.name
+        data = path.read_bytes()
+        if data.startswith(codecs.BOM_UTF8):
+            data = data[len(codecs.BOM_UTF8):]
+        remote = with_retries(run, "checking " + name, lambda: store.md5(name))
+        if remote and remote == md5_bytes(data):
+            run.skip(name + " (identical)")
+        elif run.dry_run:
+            run.did(name)
+        else:
+            content_type = CONTENT_TYPES.get(path.suffix.lower(), "application/octet-stream")
+            with_retries(run, "uploading " + name, lambda: store.write(name, data, content_type, SHORT))
+            run.did(name)
+        run.progress(1, "Game data", i + 1, len(paths), "files", name, i + 1, len(paths), force=i + 1 == len(paths))
+
+
+def data_promote(src, dst, run, app_version):
+    prefix = data_prefix(app_version)
+    names = sorted(n for n in src.list(prefix) if "/" not in n[len(prefix):])
+    if not names:
+        raise PublishError(f"The source has no game data in {prefix}. Publish it first.")
+    run.say(f"Promoting {len(names)} data file(s) in {prefix}")
+    copy_blobs(src, dst, run, 1, "Game data", names, create_only=False, keep_going=False)
+
+
 # --------------------------------------------------------------------------------------- rollback / status
 
 def rollback(store, run, platform, app_version, product_id, to=None, drop=None):
@@ -870,6 +924,16 @@ def main(argv=None, store_factory=AzureStore):
     p.add_argument("--allow-new-catalog", action="store_true",
                    help="promote even if the destination already has a catalog with a different name")
 
+    p = sub.add_parser("data-publish", help="upload game data files to data/<appVersion>/")
+    common(p)
+    p.add_argument("--app-version", required=True)
+    p.add_argument("--file", nargs="+", required=True, metavar="PATH", help="files to upload; each keeps its file name")
+
+    p = sub.add_parser("data-promote", help="copy data/<appVersion>/ to another container (staging -> production)")
+    common(p)
+    p.add_argument("--to-container", required=True, help="destination container, e.g. dlc-production")
+    p.add_argument("--app-version", required=True)
+
     p = sub.add_parser("check", help="confirm the signed-in user can reach the container")
     common(p)
 
@@ -893,12 +957,17 @@ def main(argv=None, store_factory=AzureStore):
         if not re.match(r"^[a-z0-9](?!.*--)[a-z0-9-]{1,61}[a-z0-9]$", args.container):
             raise PublishError(f"Invalid container name '{args.container}'.")
         store = store_factory(args.account_url, args.container)
-        if args.command == "promote":
+        if args.command in ("promote", "data-promote"):
             if not re.match(r"^[a-z0-9](?!.*--)[a-z0-9-]{1,61}[a-z0-9]$", args.to_container):
                 raise PublishError(f"Invalid container name '{args.to_container}'.")
             if args.to_container == args.container:
                 raise PublishError("--to-container is the same as --container.")
             run.say(f"  -> {args.account_url}/{args.to_container}")
+        if args.command == "data-promote":
+            data_promote(store, store_factory(args.account_url, args.to_container), run, args.app_version)
+        elif args.command == "data-publish":
+            data_publish(store, run, args.app_version, args.file)
+        elif args.command == "promote":
             promote(store, store_factory(args.account_url, args.to_container), run, args.platform, args.app_version,
                     args.product, args.allow_new_catalog)
         elif args.command == "publish":

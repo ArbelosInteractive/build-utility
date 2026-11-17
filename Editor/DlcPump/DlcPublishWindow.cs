@@ -141,6 +141,8 @@ public sealed class DlcPublishWindow : EditorWindow
             EditorGUILayout.Space();
             DrawPromote();
             EditorGUILayout.Space();
+            DrawGameData();
+            EditorGUILayout.Space();
             DrawRollback();
         }
         EditorGUILayout.Space();
@@ -553,6 +555,51 @@ public sealed class DlcPublishWindow : EditorWindow
             if (GUILayout.Button("Production status", GUILayout.Width(120)))
                 Execute("production status", (line, progress, cancel) => DlcContentPublisher.Status(settings, production: true));
         }
+    }
+
+    void DrawGameData()
+    {
+        EditorGUILayout.LabelField("Game data (IAP catalog)", EditorStyles.boldLabel);
+        if (!settings) return;
+        EditorGUILayout.HelpBox(
+            $"The game downloads these at startup instead of only using the copies built into the app, so new store products " +
+            $"(and anything else the project adds) go live without a new build. One copy per app version for every platform: " +
+            $"data/{DlcContentPublisher.CurrentAppVersion}/ in each container. Players without a connection use their last " +
+            "download, then the built-in copy. Publish to staging, test with a staging build, then promote.", MessageType.None);
+        using (new EditorGUILayout.HorizontalScope())
+        {
+            if (GUILayout.Button("Publish game data dry run")) StartGameData(false, true);
+            if (GUILayout.Button("Publish game data to staging…")) StartGameData(false, false);
+        }
+        using (new EditorGUILayout.HorizontalScope())
+        {
+            if (GUILayout.Button("Promote game data dry run")) StartGameData(true, true);
+            if (GUILayout.Button("Promote game data to production…")) StartGameData(true, false);
+        }
+    }
+
+    void StartGameData(bool promote, bool dryRun)
+    {
+        if (promote)
+        {
+            if (!dryRun && !EditorUtility.DisplayDialog("Promote game data to PRODUCTION",
+                    $"Copy every file in\n{DlcContentPublisher.DataDestination(settings)}\n\nto PRODUCTION\n{DlcContentPublisher.ProductionDataDestination(settings)}\n\n" +
+                    "Players of this app version use it the next time the store loads. Did you test it with a staging build?",
+                    "Promote to production", "Cancel"))
+                return;
+            Execute(dryRun ? "promote game data dry run" : "promote game data",
+                (line, progress, cancel) => DlcContentPublisher.PromoteData(settings, dryRun, line, progress, cancel));
+            return;
+        }
+        var files = DlcContentPublisher.PrepareGameData(out string error);
+        if (error != null) { report = error; return; }
+        string names = string.Join(", ", files.Select(Path.GetFileName));
+        if (!dryRun && !EditorUtility.DisplayDialog("Publish game data to staging",
+                $"Upload {names}\n\nto\n{DlcContentPublisher.DataDestination(settings)}\n\nStaging builds of {DlcContentPublisher.CurrentAppVersion} use it the next time the store loads.",
+                "Publish", "Cancel"))
+            return;
+        Execute(dryRun ? "game data dry run" : "publish game data",
+            (line, progress, cancel) => DlcContentPublisher.PublishData(settings, files, dryRun, line, progress, cancel));
     }
 
     void StartPromote(bool dryRun)

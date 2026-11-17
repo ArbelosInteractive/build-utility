@@ -104,6 +104,67 @@ public static class DlcContentPublisher
         return Run(settings, args, dryRun, onLine, onProgress, cancel);
     }
 
+    /// <summary>Where game data lives in the staging container for the current app version.</summary>
+    public static string DataDestination(DlcPublishingSettings settings) =>
+        $"{settings.AccountUrl}/{settings.container}/data/{CurrentAppVersion}/";
+
+    /// <summary>Where game data lives in the production container for the current app version.</summary>
+    public static string ProductionDataDestination(DlcPublishingSettings settings) =>
+        $"{settings.AccountUrl}/{settings.productionContainer}/data/{CurrentAppVersion}/";
+
+    /// <summary>
+    /// Writes the game data files to Library/DlcGameData/&lt;appVersion&gt;/ and returns their paths: the IAP catalog
+    /// (under its own file name) plus whatever the project adapter adds through <see cref="IDlcGameData"/>.
+    /// </summary>
+    public static List<string> PrepareGameData(out string error)
+    {
+        error = null;
+        var files = new List<string>();
+        var adapter = DlcProject.Adapter;
+        if (adapter == null) { error = "No DLC project adapter is registered."; return files; }
+        string folder = Path.GetFullPath(Path.Combine("Library", "DlcGameData", CurrentAppVersion));
+        if (Directory.Exists(folder)) Directory.Delete(folder, true);
+        Directory.CreateDirectory(folder);
+
+        string catalog = adapter.CatalogPath;
+        if (string.IsNullOrEmpty(catalog) || !File.Exists(catalog)) { error = $"IAP catalog not found at '{catalog}'."; return files; }
+        try { JObject.Parse(File.ReadAllText(catalog)); }
+        catch (Exception e) { error = $"{catalog} isn't valid JSON: {e.Message}"; return files; }
+        string target = Path.Combine(folder, Path.GetFileName(catalog));
+        File.Copy(catalog, target);
+        files.Add(target);
+
+        if (adapter is IDlcGameData extra)
+            foreach (var pair in extra.GameDataFiles() ?? new Dictionary<string, string>())
+            {
+                if (string.IsNullOrEmpty(pair.Key) || pair.Key.Any(c => !(char.IsLetterOrDigit(c) || c == '.' || c == '_' || c == '-')) ||
+                    files.Any(f => string.Equals(Path.GetFileName(f), pair.Key, StringComparison.OrdinalIgnoreCase)))
+                { error = $"Game data file name '{pair.Key}' is invalid or used twice."; return new List<string>(); }
+                string path = Path.Combine(folder, pair.Key);
+                File.WriteAllText(path, pair.Value ?? "", new UTF8Encoding(false));
+                files.Add(path);
+            }
+        return files;
+    }
+
+    /// <summary>Uploads game data files to data/&lt;appVersion&gt;/ in the staging container, replacing older copies.</summary>
+    public static Task<(int code, string output)> PublishData(DlcPublishingSettings settings, IEnumerable<string> files, bool dryRun,
+        Action<string> onLine = null, Action<DlcPublishProgress> onProgress = null, CancellationToken cancel = default)
+    {
+        var args = new List<string> { "data-publish", "--app-version", CurrentAppVersion, "--progress", "--file" };
+        args.AddRange(files);
+        return Run(settings, args, dryRun, onLine, onProgress, cancel);
+    }
+
+    /// <summary>Copies data/&lt;appVersion&gt;/ from the staging container to the production container.</summary>
+    public static Task<(int code, string output)> PromoteData(DlcPublishingSettings settings, bool dryRun,
+        Action<string> onLine = null, Action<DlcPublishProgress> onProgress = null, CancellationToken cancel = default)
+    {
+        if (string.IsNullOrWhiteSpace(settings.productionContainer)) return Task.FromResult((1, $"productionContainer is empty in {settings.name}."));
+        return Run(settings, new List<string> { "data-promote", "--to-container", settings.productionContainer.Trim(),
+            "--app-version", CurrentAppVersion, "--progress" }, dryRun, onLine, onProgress, cancel);
+    }
+
     /// <summary>Signs in to the container as the Azure CLI user and reads its properties. Writes nothing.</summary>
     public static Task<(int code, string output)> Check(DlcPublishingSettings settings) =>
         Run(settings, new List<string> { "check" }, false);

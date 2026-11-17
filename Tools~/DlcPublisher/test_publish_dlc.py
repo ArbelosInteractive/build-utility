@@ -445,5 +445,42 @@ class PublishTests(unittest.TestCase):
         self.assertEqual(0, self.run_cmd("publish", "--staging", str(self.export({"a": ["A/1"]}, None, b"zip-1")), "--dry-run"))
         self.assertEqual([], self.store.writes)
 
+    DATA = "data/1.4.0/IAPProductCatalog.json"
+
+    def data_file(self, text, name="IAPProductCatalog.json", bom=False):
+        path = self.tmp / name
+        path.write_bytes((b"\xef\xbb\xbf" if bom else b"") + text.encode("utf-8"))
+        return str(path)
+
+    def test_data_publish_replaces_and_skips_identical(self):
+        base = ["data-publish", "--app-version", "1.4.0", "--file"]
+        self.assertEqual(0, self.run_cmd(*base, self.data_file('{"products": [1]}', bom=True)))
+        self.assertEqual(b'{"products": [1]}', self.store.blobs[self.DATA][0])  # BOM stripped
+        self.store.writes.clear()
+        self.assertEqual(0, self.run_cmd(*base, self.data_file('{"products": [1]}')))
+        self.assertEqual([], self.store.writes)
+        self.assertEqual(0, self.run_cmd(*base, self.data_file('{"products": [1, 2]}')))
+        self.assertEqual(b'{"products": [1, 2]}', self.store.blobs[self.DATA][0])
+
+    def test_data_publish_rejects_invalid_json_and_dry_run_writes_nothing(self):
+        base = ["data-publish", "--app-version", "1.4.0", "--file"]
+        self.assertEqual(1, self.run_cmd(*base, self.data_file('{"products": [')))
+        self.assertEqual(1, self.run_cmd(*base, str(self.tmp / "missing.json")))
+        self.assertEqual(0, self.run_cmd(*base, self.data_file("{}"), "--dry-run"))
+        self.assertEqual({}, self.store.blobs)
+
+    def test_data_promote_copies_and_overwrites(self):
+        self.assertEqual(0, self.run_cmd("data-publish", "--app-version", "1.4.0", "--file",
+                                         self.data_file('{"a": 1}'), self.data_file('{"arenas": []}', "arenas.json")))
+        prod = FakeStore()
+        prod.blobs[self.DATA] = (b'{"old": true}', "e")
+        stores = {"dlc-staging": self.store, "dlc-production": prod}
+        args = ["data-promote", "--container", "dlc-staging", "--to-container", "dlc-production", "--app-version", "1.4.0",
+                "--account-url", "https://x.blob.core.windows.net", "--log-dir", str(self.tmp / "logs")]
+        self.assertEqual(0, p.main(args, store_factory=lambda url, container: stores[container]))
+        self.assertEqual(b'{"a": 1}', prod.blobs[self.DATA][0])
+        self.assertEqual(b'{"arenas": []}', prod.blobs["data/1.4.0/arenas.json"][0])
+        self.assertEqual(1, p.main(args[:6] + ["1.5.0"] + args[7:], store_factory=lambda url, container: stores[container]))
+
 if __name__ == "__main__":
     unittest.main()
