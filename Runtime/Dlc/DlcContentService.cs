@@ -56,6 +56,9 @@ namespace Arbelos.BuildUtility.Runtime
         Dictionary<string, DlcProductState> states = new Dictionary<string, DlcProductState>(StringComparer.Ordinal);
         Task<IReadOnlyDictionary<string, DlcProductState>> running;
 
+        /// <summary>How many product.json downloads run at once.</summary>
+        const int ParallelManifests = 8;
+
         /// <summary>Required when <see cref="DlcRemoteConfig.accessMode"/> is SignedUrl. See <see cref="IDlcUrlSigner"/>.</summary>
         public IDlcUrlSigner UrlSigner { get; set; }
 
@@ -140,6 +143,7 @@ namespace Arbelos.BuildUtility.Runtime
                 ids = PublishedProductIds.ToList();
             }
 
+            var downloads = new List<(DlcProductState state, DlcProductsIndexEntry entry)>();
             foreach (string id in ids)
             {
                 var state = new DlcProductState { ProductId = id };
@@ -150,8 +154,12 @@ namespace Arbelos.BuildUtility.Runtime
                 var entry = index.products?.FirstOrDefault(p => p != null && p.productId == id);
                 if (entry == null) { Fail(state, DlcProductStatus.NotInAppVersion, $"Not published for {platform} {appVersion}."); continue; }
 
-                await LoadManifest(state, entry, indexFromCache);
+                downloads.Add((state, entry));
             }
+
+            // Several manifests at a time: on a first launch none are cached, and one request per round trip adds up.
+            for (int i = 0; i < downloads.Count; i += ParallelManifests)
+                await Task.WhenAll(downloads.Skip(i).Take(ParallelManifests).Select(d => LoadManifest(d.state, d.entry, indexFromCache)));
 
             await CheckKeys(result.Values.Where(s => s.Manifest != null && s.Status == DlcProductStatus.Ready).ToList());
 
@@ -283,7 +291,7 @@ namespace Arbelos.BuildUtility.Runtime
             await init.Task;
             Addressables.Release(init);
 
-            if (await FindMissing(candidates))
+            if (FindMissing(candidates))
             {
                 // Once per load: pull the newest main catalog, then check again.
                 var check = Addressables.CheckForCatalogUpdates(false);
@@ -297,7 +305,7 @@ namespace Arbelos.BuildUtility.Runtime
                     await update.Task;
                     Addressables.Release(update);
                 }
-                await FindMissing(candidates);
+                FindMissing(candidates);
             }
 
             foreach (var s in candidates.Where(s => s.MissingKeys.Count > 0))
@@ -305,23 +313,16 @@ namespace Arbelos.BuildUtility.Runtime
                     $"{s.MissingKeys.Count} key(s) not in the loaded catalog after a catalog update, e.g. '{s.MissingKeys[0]}'.");
         }
 
-        static async Task<bool> FindMissing(List<DlcProductState> candidates)
+        // Asks the loaded catalogs directly. Awaiting LoadResourceLocationsAsync per key cost at least a frame each,
+        // which added seconds with hundreds of keys.
+        static bool FindMissing(List<DlcProductState> candidates)
         {
             bool any = false;
+            var locators = Addressables.ResourceLocators.ToList();
             foreach (var s in candidates)
             {
-                var missing = new List<string>();
-                foreach (string key in s.Keys)
-                {
-                    var handle = Addressables.LoadResourceLocationsAsync(key);
-                    await handle.Task;
-                    bool found = handle.Status == UnityEngine.ResourceManagement.AsyncOperations.AsyncOperationStatus.Succeeded
-                                 && handle.Result != null && handle.Result.Count > 0;
-                    Addressables.Release(handle);
-                    if (!found) missing.Add(key);
-                }
-                s.MissingKeys = missing;
-                any |= missing.Count > 0;
+                s.MissingKeys = s.Keys.Where(key => !locators.Any(l => l.Locate(key, null, out var found) && found != null && found.Count > 0)).ToList();
+                any |= s.MissingKeys.Count > 0;
             }
             return any;
         }
