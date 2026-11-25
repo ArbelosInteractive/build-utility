@@ -46,21 +46,47 @@ public static class DlcStoreCatalogExport
         return new JObject { ["releaseId"] = releaseId, ["products"] = selected };
     }
 
-    public static void AddMissingProducts(JObject manifest, DlcStoreExportOptions options)
+    // Defaults for newly added products: one US-English listing, priced in US dollars.
+    public const string DefaultLocale = "en-US", DefaultCurrency = "USD", DefaultGoogleRegion = "US";
+
+    /// <summary>The product's price from the IAP catalog (googlePrice.num) as a dot-decimal string, or "" when it has none.</summary>
+    public static string CatalogPrice(JToken product)
     {
+        var num = product?["googlePrice"]?["num"];
+        if (num == null || num.Type == JTokenType.Null) return "";
+        decimal price;
+        try { price = num.Value<decimal>(); } catch (Exception) { return ""; }
+        return price > 0 ? price.ToString("0.##", CultureInfo.InvariantCulture) : "";
+    }
+
+    /// <summary>
+    /// Adds a settings entry for each manifest product that has none, filled with an en-US listing (PlayFab, Apple and
+    /// Google), a USD Apple base price and a US Google price, both taken from the IAP catalog. Products already in the
+    /// settings are left unchanged. Returns the IDs that were added without a price because the catalog has none.
+    /// </summary>
+    public static List<string> AddMissingProducts(JObject manifest, DlcStoreExportOptions options)
+    {
+        var unpriced = new List<string>();
         foreach (var p in Products(manifest))
         {
             string id = (string)p["id"];
             if (options.products.Any(x => x != null && x.productId == id)) continue;
+            string price = CatalogPrice(p);
+            if (price.Length == 0) unpriced.Add(id);
             options.products.Add(new DlcStoreExportProduct {
                 productId = id, playFabContentType = (string)p["payouts"]?.FirstOrDefault()?["st"] ?? "",
                 appleReferenceName = (string)p["defaultDescription"]?["title"] ?? "",
                 appleReviewScreenshotPath = (string)p["screenshotPath"] ?? "",
+                appleBasePrice = price, appleBaseCurrency = DefaultCurrency,
                 localizations = new List<DlcStoreExportLocalization> { new DlcStoreExportLocalization {
+                    playFabLocale = DefaultLocale, appleLocale = DefaultLocale, googleLanguageCode = DefaultLocale,
                     title = (string)p["defaultDescription"]?["title"] ?? "",
-                    description = (string)p["defaultDescription"]?["description"] ?? "" } }
+                    description = (string)p["defaultDescription"]?["description"] ?? "" } },
+                googleRegions = new List<DlcStoreExportRegion> { new DlcStoreExportRegion {
+                    regionCode = DefaultGoogleRegion, currencyCode = DefaultCurrency, price = price } }
             });
         }
+        return unpriced;
     }
 
     public static List<string> Validate(JObject manifest, DlcStoreExportOptions o)

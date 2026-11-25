@@ -83,12 +83,9 @@ public class DlcStoreCatalogExportTests
         DlcStoreCatalogExport.AddMissingProducts(manifest, o);
         foreach (var p in o.products)
         {
-            p.appleBasePrice = "1.99"; p.appleBaseCurrency = "USD";
+            p.appleBasePrice = "1.99";
             p.appleReviewScreenshotPath = ReviewScreenshotFixture();
-            p.localizations[0].appleLocale = "en-US";
-            p.localizations[0].googleLanguageCode = "en-US";
-            p.localizations[0].playFabLocale = "en-US";
-            p.googleRegions.Add(new DlcStoreExportRegion { regionCode = "US", currencyCode = "USD", price = "1.990000001" });
+            p.googleRegions[0].price = "1.990000001";
         }
         return o;
     }
@@ -287,6 +284,29 @@ public class DlcStoreCatalogExportTests
         Assert.IsTrue(errors.Any(e => e.Contains("Google US")));
         Assert.IsTrue(errors.Any(e => e.Contains("invalid Google product ID")));
         Assert.IsTrue(errors.Any(e => e.Contains("maximum 30")));
+    }
+
+    [Test]
+    public void AddedProductsGetUsEnglishListingAndCatalogPrice()
+    {
+        var m = Manifest(2);
+        m["products"][0]["googlePrice"] = new JObject { ["data"] = new JArray(299, 0, 0, 131072), ["num"] = 2.99 };
+        var o = new DlcStoreExportOptions();
+        var unpriced = DlcStoreCatalogExport.AddMissingProducts(m, o);
+
+        var priced = o.products[0];
+        Assert.AreEqual("2.99", priced.appleBasePrice);
+        Assert.AreEqual("USD", priced.appleBaseCurrency);
+        Assert.AreEqual("en-US", priced.localizations[0].playFabLocale);
+        Assert.AreEqual("en-US", priced.localizations[0].appleLocale);
+        Assert.AreEqual("en-US", priced.localizations[0].googleLanguageCode);
+        Assert.AreEqual(1, priced.googleRegions.Count);
+        Assert.AreEqual("US", priced.googleRegions[0].regionCode);
+        Assert.AreEqual("USD", priced.googleRegions[0].currencyCode);
+        Assert.AreEqual("2.99", priced.googleRegions[0].price);
+
+        Assert.AreEqual("", o.products[1].appleBasePrice);
+        CollectionAssert.AreEqual(new[] { o.products[1].productId }, unpriced);
     }
 
     [Test]

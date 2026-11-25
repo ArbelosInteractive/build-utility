@@ -189,11 +189,14 @@ public sealed class DlcStoreExportWindow : EditorWindow
                 var manifest = DlcStoreCatalogExport.ManifestFor(DlcReleaseService.Catalog(), productIds, EffectiveExportId());
                 int before = settings.options.products.Count;
                 Undo.RecordObject(settings, "Add store export products");
-                DlcStoreCatalogExport.AddMissingProducts(manifest, settings.options);
+                var unpriced = DlcStoreCatalogExport.AddMissingProducts(manifest, settings.options);
                 EditorUtility.SetDirty(settings);
                 AssetDatabase.SaveAssets();
-                report = $"Added {settings.options.products.Count - before} product(s); {productIds.Count - (settings.options.products.Count - before)} were already in the settings and were left unchanged.\n" +
-                         "Fill in locales, prices, territories and application IDs, then validate.";
+                int added = settings.options.products.Count - before;
+                report = $"Added {added} product(s); {productIds.Count - added} were already in the settings and were left unchanged.\n" +
+                         $"New products get an {DlcStoreCatalogExport.DefaultLocale} listing, a {DlcStoreCatalogExport.DefaultCurrency} price from the IAP catalog " +
+                         $"and Google region {DlcStoreCatalogExport.DefaultGoogleRegion}. Check territories, application IDs and review screenshots, then validate." +
+                         (unpriced.Count > 0 ? $"\nNo price in the IAP catalog, so enter one by hand: {string.Join(", ", unpriced)}" : "");
             }
         }
 
