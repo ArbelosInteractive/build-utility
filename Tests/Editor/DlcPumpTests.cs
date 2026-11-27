@@ -16,6 +16,17 @@ public class DlcPumpTests
     }
 
     [Test]
+    public void ListingTextMustFitStoreLimits()
+    {
+        var original = JObject.Parse("{products:[{id:'pack',defaultDescription:{title:'old',description:'old'}}]}");
+        Assert.IsEmpty(DlcCatalogEditing.ListingProblems(new string('t', 30), new string('d', 45)));
+        Assert.AreEqual(1, DlcCatalogEditing.ListingProblems(new string('t', 31), "ok").Count);
+        Assert.AreEqual(1, DlcCatalogEditing.ListingProblems("ok", new string('d', 46)).Count);
+        Assert.Throws<ArgumentException>(() => DlcCatalogEditing.Patch(original, "pack", new string('t', 31), "ok"));
+        Assert.Throws<ArgumentException>(() => DlcCatalogEditing.Patch(original, "pack", "ok", new string('d', 46)));
+    }
+
+    [Test]
     public void ArtifactVerificationDetectsTamperingAndExtraFiles()
     {
         string folder = Path.Combine(Path.GetTempPath(), "dlcpump-test-" + Guid.NewGuid().ToString("N"));

@@ -151,9 +151,12 @@ public sealed class DlcManagerWindow : EditorWindow
         {
             EditorGUILayout.Space();
             EditorGUILayout.LabelField("Edit " + editingProduct, EditorStyles.boldLabel);
-            productTitle = EditorGUILayout.TextField("Title", productTitle);
-            productDescription = EditorGUILayout.TextArea(productDescription, GUILayout.MinHeight(65));
+            productTitle = LimitedField("Title", productTitle, DlcCatalogEditing.TitleMax);
+            productDescription = LimitedField("Description", productDescription, DlcCatalogEditing.DescriptionMax);
             EditorGUILayout.HelpBox("Edits local marketing text only. Product IDs, prices, store overrides and payouts remain intact. A backup is saved automatically; live stores are unchanged.", MessageType.Info);
+            var listingProblems = DlcCatalogEditing.ListingProblems(productTitle, productDescription);
+            if (listingProblems.Count > 0) EditorGUILayout.HelpBox(string.Join("\n", listingProblems), MessageType.Error);
+            using (new EditorGUI.DisabledScope(listingProblems.Count > 0))
             if (GUILayout.Button("Save listing with backup"))
             {
                 report = "Saved. Backup: " + DlcCatalogEditing.Save(catalogHash,
@@ -166,9 +169,10 @@ public sealed class DlcManagerWindow : EditorWindow
             EditorGUILayout.Space();
             EditorGUILayout.LabelField("Create a pack from selected products", EditorStyles.boldLabel);
             packId = EditorGUILayout.TextField("New product ID", packId);
-            packTitle = EditorGUILayout.TextField("Title", packTitle);
-            packDescription = EditorGUILayout.TextField("Description", packDescription);
+            packTitle = LimitedField("Title", packTitle, DlcCatalogEditing.TitleMax);
+            packDescription = LimitedField("Description", packDescription, DlcCatalogEditing.DescriptionMax);
             EditorGUILayout.HelpBox("Creates local catalog and runtime grant data through the project adapter. Register and price the new product in stores/backend before release. Existing product ownership is preserved.", MessageType.Info);
+            using (new EditorGUI.DisabledScope(DlcCatalogEditing.ListingProblems(packTitle, packDescription).Count > 0))
             if (GUILayout.Button("Create pack"))
             {
                 string id = authoring.CreatePack(packId, packTitle, packDescription, release.productIds.ToArray());
@@ -257,5 +261,19 @@ public sealed class DlcManagerWindow : EditorWindow
                 DlcStoreReadiness.Requirements(DlcReleaseService.Snapshot(release)), JObject.Parse(File.ReadAllText(path)));
         }
         EditorGUILayout.TextArea(report, GUILayout.MinHeight(220));
+    }
+
+    // A text field with a live "used / max" count that turns red past the store limit.
+    static string LimitedField(string label, string text, int max)
+    {
+        using (new EditorGUILayout.HorizontalScope())
+        {
+            text = EditorGUILayout.TextField(label, text ?? "");
+            int used = text.Trim().Length;
+            var style = new GUIStyle(EditorStyles.miniLabel) { alignment = TextAnchor.MiddleRight };
+            if (used > max) style.normal.textColor = new Color(0.9f, 0.25f, 0.2f);
+            GUILayout.Label(used + "/" + max, style, GUILayout.Width(44));
+        }
+        return text;
     }
 }

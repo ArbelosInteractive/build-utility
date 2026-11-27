@@ -63,7 +63,8 @@ public static class DlcReleaseService
             var product = products.FirstOrDefault(p => (string)p["id"] == id);
             if (product == null) { issues.Add("ERROR: Unknown product: " + id); continue; }
             if ((int?)product["type"] != 1) issues.Add("ERROR: DLC product must be non-consumable: " + id);
-            if (string.IsNullOrWhiteSpace((string)product["defaultDescription"]?["title"])) issues.Add("ERROR: Missing product title: " + id);
+            foreach (string problem in DlcCatalogEditing.ListingProblems((string)product["defaultDescription"]?["title"], (string)product["defaultDescription"]?["description"]))
+                issues.Add("ERROR: Product listing " + id + ": " + problem);
             if (!(product["payouts"] is JArray payouts) || payouts.Count == 0) issues.Add("ERROR: Missing payout definition: " + id);
             if (!release.content.Any(c => c != null && c.productId == id && c.asset)) issues.Add("ERROR: Assign content for " + id);
             var policy = new List<string>();
